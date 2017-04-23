@@ -1,19 +1,24 @@
 {
   "name": "posts-adapter-pure-to-hugo",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "version": "0.0.1",
+  "description": "Adapter for convert md posts to hugo format which converted by wp2md.js",
+  "main": "bin/convert",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "convert": "bin/convert"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/soulteary/posts-adapter-pure-to-hugo.git"
   },
-  "author": "",
-  "license": "ISC",
+  "author": "soulteary <soulteary@gmail.com>",
+  "license": "MIT",
   "bugs": {
     "url": "https://github.com/soulteary/posts-adapter-pure-to-hugo/issues"
   },
   "homepage": "https://github.com/soulteary/posts-adapter-pure-to-hugo#readme",
+  "dependencies": {
+    "commander": "^2.9.0",
+    "marked": "^0.3.6",
+    "request": "^2.81.0"
+  }
 }

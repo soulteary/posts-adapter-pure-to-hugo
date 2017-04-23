@@ -1,0 +1,14 @@
+{
+  "blackList": [
+    ".DS_Store",
+    ".git",
+    ".gitignore",
+    "README.json",
+    "README.md"
+  ],
+  "charset": "utf-8",
+  "debug": {
+    "enable": true,
+    "maxFilesCount": 1
+  }
+}

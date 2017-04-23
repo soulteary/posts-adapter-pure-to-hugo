@@ -1,0 +1,18 @@
+#!/usr/bin/env node
+let cmd = require('commander');
+let convert = require('../convert');
+let pkg = require('../package.json');
+
+cmd
+    .version(pkg.version)
+    .option('-ch, --custom-highlight', 'Enable custom highlight.')
+    .option('-s, --source [path]', 'Source dir.')
+    .usage('<exportFile Path> or <exportFile Path>')
+    .parse(process.argv);
+
+if (!cmd.args.length || cmd.args.length > 3 || !cmd.source) {
+  cmd.help();
+  process.exit();
+}
+
+convert(cmd.source, cmd.customHighlight);

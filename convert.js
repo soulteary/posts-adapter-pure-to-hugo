@@ -19,17 +19,6 @@ const log4process = log('process');
 
 const request = require('request');
 const querystring = require('querystring');
-const marked = require('marked');
-const lexer = new marked.Lexer({
-    renderer: new marked.Renderer(),
-    gfm: true,
-    tables: true,
-    breaks: false,
-    pedantic: false,
-    sanitize: false,
-    smartLists: true,
-    smartypants: false
-});
 
 // todo enable useCodeHighlight feature
 module.exports = function (sourceDirPath, useCodeHighlight) {

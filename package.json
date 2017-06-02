@@ -18,7 +18,6 @@
   "homepage": "https://github.com/soulteary/posts-adapter-pure-to-hugo#readme",
   "dependencies": {
     "commander": "^2.9.0",
-    "marked": "^0.3.6",
     "request": "^2.81.0"
   }
 }

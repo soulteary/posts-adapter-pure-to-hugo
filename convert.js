@@ -21,14 +21,13 @@ const request = require('request');
 const querystring = require('querystring');
 
 // todo enable useCodeHighlight feature
-module.exports = function (sourceDirPath, useCodeHighlight) {
+module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
 
     let categoriesStatistics = {result: []};
     let fileCount = 0;
 
     const sourceDir = path.relative('.', sourceDirPath);
-    const distDir = path.join('./export', path.basename(sourceDir));
-
+    const distDir = distDirPath ? distDirPath : path.join('./export', path.basename(sourceDir));
 
     /**
      * 文件过滤器
@@ -256,7 +255,7 @@ module.exports = function (sourceDirPath, useCodeHighlight) {
                         if (err) {
                             return reject(err);
                         }
-                        return resolve(codeParser(source.replace(originText, body)));
+                        return resolve(codeParser(source.replace(originText, '{{<crayonCode>}}\n' + body + '\n{{</crayonCode>}}')));
                     });
                 })) : mainResolve(source);
             } else {

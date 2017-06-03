@@ -226,7 +226,7 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
             if (useCodeHighlight) {
 
                 const CodeWithoutLang = source.match(/```\n([\s\S\n]+?)\n```/);
-                const CodeWithLang = source.match(/```(\w+)\n([\s\S\n]+?)\n```/);
+                const CodeWithLang = source.match(/```(\S+)\n([\s\S\n]+?)\n```/);
 
                 let lang = '';
                 let code = '';
@@ -245,14 +245,16 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
                     code = '';
                 }
                 return code ? mainResolve(new Promise(function (resolve, reject) {
-                    const postData = querystring.stringify({
+                    const postData = {
                         'code': lang ? `[crayon lang=${lang}]\n${code}\n[/crayon]\n` : `[crayon]\n${code}\n[/crayon]\n`
-                    });
+                    };
                     request.post({
                         url: 'http://127.0.0.1:1234/',
-                        form: postData
+                        form: querystring.stringify(postData)
                     }, function (err, httpResponse, body) {
                         if (err) {
+                            console.log(err);
+                            console.log(postData);
                             return reject(err);
                         }
                         return resolve(codeParser(source.replace(originText, '{{<crayonCode>}}\n' + body + '\n{{</crayonCode>}}')));

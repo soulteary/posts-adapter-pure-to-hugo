@@ -11,6 +11,8 @@ const config = require('./config.json');
 // 忽略文件列表、文件编码、调试模式
 const {blackList, charset, debug} = config;
 
+const moment = require('moment');
+
 const log = require('./lib/log');
 const log4scanDirs = log('scanDirs');
 const log4matchMeta = log('matchMeta');
@@ -19,6 +21,8 @@ const log4process = log('process');
 
 const request = require('request');
 const querystring = require('querystring');
+
+const showCategory = false;
 
 // todo enable useCodeHighlight feature
 module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
@@ -134,21 +138,95 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
     }
 
 
+    function generateDesc(fileContent) {
+        /**
+         * 修正最后一行内容
+         * @param descResult
+         * @returns {*}
+         */
+        function fixLastLine(descResult) {
+            const lastLineNumber = descResult.length - 1;
+            const lastLine = descResult[lastLineNumber];
+            if (!lastLine) {
+                return [];
+            }
+            const lastWord = lastLine[lastLine.length - 1];
+
+            if (lastLine.endsWith('诸如:') || lastLine.endsWith('诸如：')) {
+                // 将诸如结尾的内容干掉
+                descResult[lastLineNumber] = lastLine.substr(0, lastLine.lastIndexOf('诸如'));
+            } else if (['：', ':'].indexOf(lastWord) > -1) {
+                // 长段落内容最后结尾是冒号，替换为句号。
+                descResult[lastLineNumber] = lastLine.substr(0, lastLine.length - 1) + '。';
+            } else if (lastLine.lastIndexOf('。') > -1 && lastLine.lastIndexOf('。') !== lastWord) {
+                // 句号后还有内容，直接抛弃。
+                descResult[lastLineNumber] = lastLine.substr(0, lastLine.lastIndexOf('。') + 1);
+            } else {
+                console.log('[---]', '没有处理的内容');
+                console.log('lastLine', lastLine);
+            }
+            return descResult;
+        }
+
+        /**
+         * 获取描述内容
+         * @param descResult
+         * @returns {string}
+         */
+        function getResult(descResult) {
+            return descResult.length ? fixLastLine(descResult).join('\n') : '';
+        }
+
+        let fileLines = fileContent ? fileContent.split('\n') : [];
+        let descResult = [];
+        let hasSkipHeadline = false;
+        if (!fileLines.length) {
+            return getResult(descResult);
+        }
+        for (let i = 0, j = fileLines.length; i < j; i++) {
+            const line = fileLines[i];
+            // 获取两个标题内的内容
+            if (line.match(/\s*?(#)+[\s\S]+/)) {
+                if (hasSkipHeadline) {
+                    return getResult(descResult);
+                }
+                hasSkipHeadline = true;
+            } else if (line.match(/\s*?`{3}/)) {
+                // 跳过代码
+                return getResult(descResult);
+            } else if (line.match(/^\s*?$/)) {
+                // 跳过空行
+            } else if (line.match(/\s*?>\s+\*/)) {
+                // 跳过引用
+                return getResult(descResult);
+            } else {
+                // 将其他内容保存
+                descResult.push(line.replace(/^\s+|\s+$/, ''));
+            }
+        }
+
+        return getResult(descResult);
+    }
+
     /**
      * 通过JSON内容生成文章头部数据信息
      *
      * @todo hugo未来会对这种内容支持越来越完善，但是有许多内容还是需要自己定制处理
      * @param data
+     * @param fileContent
      * @returns {*}
      */
-    function generatePostHeaderMeta(data) {
+    function generatePostHeaderMeta(data, fileContent) {
         try {
-
             let header = JSON.parse(data);
             let tpl = [];
             tpl.push('---');
             tpl.push(`title: "${header.title}"`);
-            tpl.push(`description: "${header.description}"`);
+            if (header.description) {
+                tpl.push(`description: "${header.description}"`);
+            } else {
+                tpl.push(`description: "${generateDesc(fileContent)}"`);
+            }
             if (header.tag) {
                 tpl.push(`tags: [${JSON.stringify(header.tag).slice(1, -1)}]`);
             }
@@ -162,13 +240,17 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
                 header.categories.map(function (item) {
                     if (!categoriesStatistics[item.slug]) {
                         categoriesStatistics[item.slug] = true;
-                        console.log(item);
+                        if (showCategory) {
+                            console.log(item);
+                        }
                     }
                 });
             }
 
             tpl.push(`created: "${header.created_at}"`);
             tpl.push(`updated: "${header.updated_at}"`);
+            moment.locale('zh-cn');
+            tpl.push(`dateForChinese: "${moment().format('L')}"`)
 
             if (header.alias) {
                 if (typeof header.alias === 'string') {
@@ -288,7 +370,7 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
                         }
                     });
 
-                    Promise.all([generatePostHeaderMeta(metaContent), codeParser(fileContent)]).then(function (contents) {
+                    Promise.all([generatePostHeaderMeta(metaContent, fileContent), codeParser(fileContent)]).then(function (contents) {
                         if (contents.length === 2 && contents[0] && contents[1]) {
                             let content = contents.join('');
 

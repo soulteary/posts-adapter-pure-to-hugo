@@ -31,7 +31,7 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
     let fileCount = 0;
 
     const sourceDir = path.relative('.', sourceDirPath);
-    const distDir = distDirPath ? distDirPath : path.join('./export', path.basename(sourceDir));
+    const distDir = distDirPath ? `${distDirPath}/post` : path.join('./export', path.basename(sourceDir));
 
     /**
      * 文件过滤器
@@ -156,14 +156,14 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
                 // 将诸如结尾的内容干掉
                 descResult[lastLineNumber] = lastLine.substr(0, lastLine.lastIndexOf('诸如'));
             } else if (['：', ':'].indexOf(lastWord) > -1) {
-                // 长段落内容最后结尾是冒号，替换为句号。
-                descResult[lastLineNumber] = lastLine.substr(0, lastLine.length - 1) + '。';
+                // 长段落内容最后结尾是冒号，替换为省略号。
+                descResult[lastLineNumber] = lastLine.substr(0, lastLine.length - 1) + '...';
             } else if (lastLine.lastIndexOf('。') > -1 && lastLine.lastIndexOf('。') !== lastWord) {
                 // 句号后还有内容，直接抛弃。
                 descResult[lastLineNumber] = lastLine.substr(0, lastLine.lastIndexOf('。') + 1);
             } else {
-                console.log('[---]', '没有处理的内容');
-                console.log('lastLine', lastLine);
+                console.log('[---]', '未被处理的lastLine');
+                console.log(lastLine);
             }
             return descResult;
         }
@@ -174,7 +174,16 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
          * @returns {string}
          */
         function getResult(descResult) {
-            return descResult.length ? fixLastLine(descResult).join('\n') : '';
+            if (descResult.length) {
+                let result = fixLastLine(descResult);
+                if (result.length > 3) {
+                    return result.slice(0, 3);
+                } else {
+                    return result;
+                }
+            } else {
+                return '';
+            }
         }
 
         let fileLines = fileContent ? fileContent.split('\n') : [];
@@ -199,9 +208,25 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
             } else if (line.match(/\s*?>\s+\*/)) {
                 // 跳过引用
                 return getResult(descResult);
+            } else if (line.match(/\s*?[\*\-]\s+/)) {
+                // 跳过列表
+                return getResult(descResult);
+            } else if (line.match(/\s*?|.*|/)) {
+                // 跳过表格
+                return getResult(descResult);
+            } else if (line.match(/\s*?>.*]/)) {
+                // 跳过块引用
+                return getResult(descResult);
             } else {
                 // 将其他内容保存
-                descResult.push(line.replace(/^\s+|\s+$/, ''));
+                descResult.push(line
+                    // strip
+                        .replace(/^\s+|\s+$/, '')
+                        // 摘出链接文本
+                        .replace(/\[([\s\S]+)\]\(.*\)/g, "[$1]")
+                        // 剔除图片
+                        .replace(/!\[.*\]\(.*\)/g, '')
+                );
             }
         }
 
@@ -233,9 +258,61 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
             tpl.push(`lastmod: "${header.date}"`);
             tpl.push(`date: "${header.date}"`);
             if (header.categories) {
-                tpl.push(`topics: [${JSON.stringify(header.categories.map(function (item) {
-                    return item.name;
-                })).slice(1, -1)}]`);
+
+                let catData = header.categories.map(function (item) {
+                    if (item.slug && item.slug.indexOf('knowledge') > -1) {
+
+
+                        const catsMap = {
+                            'knowledge/backend-knowledge': [
+                                'knowledge/backend-knowledge',
+                                'knowledge/c-learning',
+                                'knowledge/php-learning',
+                                'knowledge/asp-learning',
+                                'knowledge/sql'
+                            ],
+                            'knowledge/system-knowledge': [
+                                'knowledge/system-knowledge',
+                                'knowledge/dos-learning',
+                                'knowledge/windows-learning',
+                                'knowledge/linux-learning',
+                                'system-knowledge'
+                            ],
+                            'knowledge/frontend-knowledge': [
+                                'knowledge/frontend-knowledge',
+                                'knowledge/web-learning',
+                                'knowledge/javascript-learning',
+                                'knowledge/css-learning',
+                                'knowledge/html-learning'
+                            ],
+                            'knowledge/desktop-knowledge': [
+                                'knowledge/desktop-knowledge',
+                                'desktop-knowledge',
+                                'knowledge/vb-learning'
+                            ],
+                            'knowledge/reference-room': [
+                                'knowledge/reference-room'
+                            ]
+                        };
+
+                        Object.keys(catsMap).forEach(function (label) {
+                            if (catsMap[label].indexOf(item.slug) > -1) {
+                                item.slug = label;
+                            }
+                        });
+
+                        if (Object.keys(catsMap).indexOf(item.slug) === -1 &&
+                            ['knowledge'].indexOf(item.slug) === -1) {
+                            console.log(item);
+                        }
+                    } else if (['leisure-moment'].indexOf(item.slug) > -1) {
+                        item.slug = 'share/leisure-moment';
+                    }
+
+                    return item.slug;
+                });
+
+                tpl.push(`topics: ${JSON.stringify(catData)}`);
 
                 header.categories.map(function (item) {
                     if (!categoriesStatistics[item.slug]) {
@@ -250,7 +327,7 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
             tpl.push(`created: "${header.created_at}"`);
             tpl.push(`updated: "${header.updated_at}"`);
             moment.locale('zh-cn');
-            tpl.push(`dateForChinese: "${moment().format('L')}"`)
+            tpl.push(`dateForChinese: "${moment().format('L')}"`);
 
             if (header.alias) {
                 if (typeof header.alias === 'string') {

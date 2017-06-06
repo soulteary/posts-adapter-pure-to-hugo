@@ -19,6 +19,7 @@
   "dependencies": {
     "commander": "^2.9.0",
     "moment": "^2.18.1",
-    "request": "^2.81.0"
+    "request": "^2.81.0",
+    "scandirectory": "^3.0.1"
   }
 }

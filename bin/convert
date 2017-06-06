@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 let cmd = require('commander');
 let convert = require('../convert');
+let archives = require('../archives');
 let pkg = require('../package.json');
 
 cmd
@@ -17,3 +18,4 @@ if (!cmd.args.length || cmd.args.length > 4 || !cmd.source) {
 }
 
 convert(cmd.source, cmd.dist, cmd.customHighlight);
+archives(cmd.source, cmd.dist);

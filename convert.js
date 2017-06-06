@@ -177,6 +177,7 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
             if (descResult.length) {
                 let result = fixLastLine(descResult);
                 if (result.length > 3) {
+
                     return result.slice(0, 3);
                 } else {
                     return result;
@@ -211,22 +212,22 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
             } else if (line.match(/\s*?[\*\-]\s+/)) {
                 // 跳过列表
                 return getResult(descResult);
-            } else if (line.match(/\s*?|.*|/)) {
+            } else if (line.match(/\s*?\|.+\|/)) {
                 // 跳过表格
                 return getResult(descResult);
             } else if (line.match(/\s*?>.*]/)) {
                 // 跳过块引用
                 return getResult(descResult);
             } else {
-                // 将其他内容保存
-                descResult.push(line
+                const saveLine = line
                     // strip
-                        .replace(/^\s+|\s+$/, '')
-                        // 摘出链接文本
-                        .replace(/\[([\s\S]+)\]\(.*\)/g, "[$1]")
-                        // 剔除图片
-                        .replace(/!\[.*\]\(.*\)/g, '')
-                );
+                    .replace(/^\s+|\s+$/, '')
+                    // 摘出链接文本
+                    .replace(/\[([\s\S]+)\]\(.*\)/g, "[$1]")
+                    // 剔除图片
+                    .replace(/!\[.*\]\(.*\)/g, '');
+                // 将其他内容保存
+                descResult.push(saveLine);
             }
         }
 
@@ -260,55 +261,6 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
             if (header.categories) {
 
                 let catData = header.categories.map(function (item) {
-                    if (item.slug && item.slug.indexOf('knowledge') > -1) {
-
-
-                        const catsMap = {
-                            'knowledge/backend-knowledge': [
-                                'knowledge/backend-knowledge',
-                                'knowledge/c-learning',
-                                'knowledge/php-learning',
-                                'knowledge/asp-learning',
-                                'knowledge/sql'
-                            ],
-                            'knowledge/system-knowledge': [
-                                'knowledge/system-knowledge',
-                                'knowledge/dos-learning',
-                                'knowledge/windows-learning',
-                                'knowledge/linux-learning',
-                                'system-knowledge'
-                            ],
-                            'knowledge/frontend-knowledge': [
-                                'knowledge/frontend-knowledge',
-                                'knowledge/web-learning',
-                                'knowledge/javascript-learning',
-                                'knowledge/css-learning',
-                                'knowledge/html-learning'
-                            ],
-                            'knowledge/desktop-knowledge': [
-                                'knowledge/desktop-knowledge',
-                                'desktop-knowledge',
-                                'knowledge/vb-learning'
-                            ],
-                            'knowledge/reference-room': [
-                                'knowledge/reference-room'
-                            ]
-                        };
-
-                        Object.keys(catsMap).forEach(function (label) {
-                            if (catsMap[label].indexOf(item.slug) > -1) {
-                                item.slug = label;
-                            }
-                        });
-
-                        if (Object.keys(catsMap).indexOf(item.slug) === -1 &&
-                            ['knowledge'].indexOf(item.slug) === -1) {
-                            console.log(item);
-                        }
-                    } else if (['leisure-moment'].indexOf(item.slug) > -1) {
-                        item.slug = 'share/leisure-moment';
-                    }
-
                     return item.slug;
                 });
 

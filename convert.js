@@ -12,6 +12,7 @@ const config = require('./config.json');
 const {blackList, charset, debug} = config;
 
 const moment = require('moment');
+const timezone = require('moment-timezone');
 
 const log = require('./lib/log');
 const log4scanDirs = log('scanDirs');
@@ -201,7 +202,7 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
                     return getResult(descResult);
                 }
                 hasSkipHeadline = true;
-            } else if (line.match(/\s*?`{3}/)) {
+            } else if (line.match(/^`{3}/)) {
                 // 跳过代码
                 return getResult(descResult);
             } else if (line.match(/^\s*?$/)) {
@@ -220,12 +221,20 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
                 return getResult(descResult);
             } else {
                 const saveLine = line
-                    // strip
+                // strip
                     .replace(/^\s+|\s+$/, '')
                     // 摘出链接文本
-                    .replace(/\[([\s\S]+)\]\(.*\)/g, "[$1]")
+                    .replace(/\[([\s\S]+?)\]\(.*?\)/g, "[$1]")
                     // 剔除图片
-                    .replace(/!\[.*\]\(.*\)/g, '');
+                    .replace(/!\[.*\]\(.*\)/g, '')
+                    // 剔除``行内代码
+                    .replace(/`(.+?)`/g, '$1')
+                    // 干掉首行的块引用
+                    .replace(/^>\s+/, '')
+                    // 干掉**加粗
+                    .replace(/\*\*\*(.*?)\*\*\*/g, '$1')
+                    .replace(/\*\*(.*?)\*\*/g, '$1');
+
                 // 将其他内容保存
                 descResult.push(saveLine);
             }
@@ -256,8 +265,11 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
             if (header.tag) {
                 tpl.push(`tags: [${JSON.stringify(header.tag).slice(1, -1)}]`);
             }
-            tpl.push(`lastmod: "${header.date}"`);
-            tpl.push(`date: "${header.date}"`);
+
+            const dateA = moment(header.date).tz('Asia/Shanghai').format('YYYY-MM-DDTHH:mm:ssZ');
+
+            tpl.push(`lastmod: "${dateA}"`);
+            tpl.push(`date: "${dateA}"`);
             if (header.categories) {
 
                 let catData = header.categories.map(function (item) {
@@ -276,10 +288,12 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
                 });
             }
 
-            tpl.push(`created: "${header.created_at}"`);
-            tpl.push(`updated: "${header.updated_at}"`);
-            moment.locale('zh-cn');
-            tpl.push(`dateForChinese: "${moment().format('L')}"`);
+            const dateB = moment(header.created_at).tz('Asia/Shanghai').format('YYYY-MM-DDTHH:mm:ssZ');
+            const dateC = moment(header.updated_at).tz('Asia/Shanghai').format('YYYY-MM-DDTHH:mm:ssZ');
+
+            tpl.push(`created: "${dateB}"`);
+            tpl.push(`updated: "${dateC}"`);
+            tpl.push(`dateForChinese: "${moment(header.created_at).format('YYYY年MM月DD日')}"`);
 
             if (header.alias) {
                 if (typeof header.alias === 'string') {
@@ -360,7 +374,7 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
                         'code': lang ? `[crayon lang=${lang}]\n${code}\n[/crayon]\n` : `[crayon]\n${code}\n[/crayon]\n`
                     };
                     request.post({
-                        url: 'http://127.0.0.1:1234/',
+                        url: 'http://127.0.0.1:1234/?api',
                         form: querystring.stringify(postData)
                     }, function (err, httpResponse, body) {
                         if (err) {

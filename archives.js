@@ -87,7 +87,7 @@ outputs: [ "HTML"]
 
 
         function generateYearArchive(year, data) {
-            const now = 'Tue Jun 06 2017 18:33:59 GMT+0800 (CST)';
+            const now = 'Tue, 06 Jun 2017 18:33:59 +0800';
             let tpl = [metaData(`${year}年文章存档`, now)];
             let monthTpl = [metaData(`${year}年文章存档`, now)];
 

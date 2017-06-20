@@ -151,7 +151,7 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
             if (!lastLine) {
                 return [];
             }
-            const lastWord = lastLine[lastLine.length - 1];
+            const lastWord = lastLine[lastLine.length - 1].trim();
 
             if (lastLine.endsWith('诸如:') || lastLine.endsWith('诸如：')) {
                 // 将诸如结尾的内容干掉
@@ -178,10 +178,9 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
             if (descResult.length) {
                 let result = fixLastLine(descResult);
                 if (result.length > 3) {
-
-                    return result.slice(0, 3);
+                    return result.slice(0, 3).join('');
                 } else {
-                    return result;
+                    return result.join('');
                 }
             } else {
                 return '';
@@ -210,8 +209,11 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
             } else if (line.match(/\s*?>\s+\*/)) {
                 // 跳过引用
                 return getResult(descResult);
-            } else if (line.match(/\s*?[\*\-]\s+/)) {
+            } else if (line.match(/\s*?(\*|\-)\s+/)) {
                 // 跳过列表
+                return getResult(descResult);
+            } else if (line.match(/\s*?\d+\.\s+/)) {
+                // 跳过数字列表
                 return getResult(descResult);
             } else if (line.match(/\s*?\|.+\|/)) {
                 // 跳过表格
@@ -223,6 +225,8 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
                 const saveLine = line
                 // strip
                     .replace(/^\s+|\s+$/, '')
+                    // 去除链接文本的图片
+                    .replace(/\[!\[.+\]\(.+\)/g, "")
                     // 摘出链接文本
                     .replace(/\[([\s\S]+?)\]\(.*?\)/g, "[$1]")
                     // 剔除图片

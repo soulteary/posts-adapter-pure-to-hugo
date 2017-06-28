@@ -5,7 +5,7 @@
 const scandir = require('scandirectory');
 
 const fs = require('fs');
-const { readFileSync, writeFileSync, existsSync, mkdirSync} = require('fs');
+const {readFileSync, writeFileSync, existsSync, mkdirSync} = require('fs');
 
 const path = require('path');
 
@@ -115,7 +115,9 @@ outputs: [ "HTML"]
         }
 
         Object.keys(finalData).forEach(function (year) {
-            if (['2017', '2016'].indexOf(year) > -1) {
+            if (['2017',
+                    '2016', '2015', '2014', '2013', '2012',
+                    '2011', '2010', '2009', '2008', '2007'].indexOf(year) > -1) {
                 generateYearArchive(year, finalData);
             }
         });

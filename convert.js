@@ -23,6 +23,8 @@ const log4process = log('process');
 const request = require('request');
 const querystring = require('querystring');
 
+const child_process = require('child_process');
+
 const showCategory = false;
 
 // todo enable useCodeHighlight feature
@@ -175,6 +177,7 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
          * @returns {string}
          */
         function getResult(descResult) {
+            console.log(descResult)
             if (descResult.length) {
                 let result = fixLastLine(descResult);
                 if (result.length > 3) {
@@ -195,6 +198,8 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
         }
         for (let i = 0, j = fileLines.length; i < j; i++) {
             const line = fileLines[i];
+            console.log(`${i} | ${line}`);
+
             // 获取两个标题内的内容
             if (line.match(/\s*?(#)+[\s\S]+/)) {
                 if (hasSkipHeadline) {
@@ -222,11 +227,11 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
                 // 跳过块引用
                 return getResult(descResult);
             } else {
-                const saveLine = line
+                let saveLine = line
                 // strip
                     .replace(/^\s+|\s+$/, '')
                     // 去除链接文本的图片
-                    .replace(/\[!\[.+\]\(.+\)/g, "")
+                    .replace(/\[!\[.+\]\(.+\)/g, '')
                     // 摘出链接文本
                     .replace(/\[([\s\S]+?)\]\(.*?\)/g, "[$1]")
                     // 剔除图片
@@ -237,10 +242,20 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
                     .replace(/^>\s+/, '')
                     // 干掉**加粗
                     .replace(/\*\*\*(.*?)\*\*\*/g, '$1')
-                    .replace(/\*\*(.*?)\*\*/g, '$1');
+                    .replace(/\*\*(.*?)\*\*/g, '$1')
+                    // 去掉ins标签
+                    .replace(/<ins\s\S+>(.+?)<\/ins>/, '$1');
 
+                if (!line.match(/http:\/\//)) {
+                    saveLine = saveLine
+                    // 替换正则为字符串，hugo bug
+                        .replace(/(\W+)\/.*\/\w+(\W+)/, '$1正则$2')
+
+                }
                 // 将其他内容保存
-                descResult.push(saveLine);
+                if (saveLine) {
+                    descResult.push(saveLine);
+                }
             }
         }
 
@@ -255,7 +270,7 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
      * @param fileContent
      * @returns {*}
      */
-    function generatePostHeaderMeta(data, fileContent) {
+    function generatePostHeaderMeta(data, fileContent, src) {
         try {
             let header = JSON.parse(data);
             let tpl = [];
@@ -324,6 +339,15 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
             }
 
             tpl.push(`isCJKLanguage: true`);
+
+            var gitInfo = revision(src).split('\n');
+            if (gitInfo[0]) {
+                tpl.push(`gitComment: "${gitInfo[0]}"`);
+                tpl.push(`gitFile: "${src}"`);
+            }
+            if (gitInfo[1]) {
+                tpl.push(`gitLabel: "${gitInfo[1]}"`);
+            }
 
             tpl.push(`slug: "${header.slug}"`);
             tpl.push('---');
@@ -397,6 +421,21 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
 
 
     /**
+     * 获取文件hash
+     * @param pathToFile
+     * @returns {Array}
+     */
+    function revision(pathToFile) {
+        var data = child_process.execSync(`cd ${path.dirname(pathToFile)};git log -n 1 --pretty=format:'%h\n%s' "${path.basename(pathToFile)}"`).toString().trim();
+        try {
+            return data;
+        } catch (e) {
+            return [];
+        }
+    }
+
+
+    /**
      * 生成文章内容
      *
      * @param meta
@@ -417,7 +456,7 @@ module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
                         }
                     });
 
-                    Promise.all([generatePostHeaderMeta(metaContent, fileContent), codeParser(fileContent)]).then(function (contents) {
+                    Promise.all([generatePostHeaderMeta(metaContent, fileContent, src), codeParser(fileContent)]).then(function (contents) {
                         if (contents.length === 2 && contents[0] && contents[1]) {
                             let content = contents.join('');
 

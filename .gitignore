@@ -1,3 +1,6 @@
 *.iml
 export/My-Blog-Posts/
 node_modules/
+
+cache/
+cache.json

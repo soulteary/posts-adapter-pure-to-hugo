@@ -2,17 +2,21 @@
 
 'use strict';
 
-const fs = require('fs');
-const {readdir, stat, readFile, writeFile, existsSync, mkdirSync} = require('fs');
+// 非高频使用，使用*sync api取代async api
+const {existsSync, readdirSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, statSync} = require('fs');
+const {basename, extname, dirname, join, relative} = require('path');
+const {createHmac} = require('crypto');
+const {execSync} = require('child_process');
+const {stringify} = require('querystring');
 
-const path = require('path');
 const config = require('./config.json');
+const pkg = require('./package');
 
 // 忽略文件列表、文件编码、调试模式
-const {blackList, charset, debug} = config;
+const {blackList, charset, debug, timezone} = config;
 
 const moment = require('moment');
-const timezone = require('moment-timezone');
+const momentTimezone = require('moment-timezone');
 
 const log = require('./lib/log');
 const log4scanDirs = log('scanDirs');
@@ -20,477 +24,492 @@ const log4matchMeta = log('matchMeta');
 const log4makeHeader = log('makeHeader');
 const log4process = log('process');
 
-const request = require('request');
-const querystring = require('querystring');
+const {post} = require('request');
 
-const child_process = require('child_process');
+const {showCategory} = debug;
 
-const showCategory = false;
+/**
+ * 计算文件Hash
+ * @param data
+ * @returns {string}
+ */
+function sign(data) {
+  return createHmac('md5', data).digest('hex');
+}
 
-// todo enable useCodeHighlight feature
-module.exports = function (sourceDirPath, distDirPath, useCodeHighlight) {
+/**
+ * 目录过滤器
+ * @param targetDirs
+ */
+function dirFilter(targetDirs) {
+  return targetDirs.map((item, idx) => targetDirs.slice(0, idx + 1).join('/')).filter(item => item && item !== '.');
+}
 
-    let categoriesStatistics = {result: []};
-    let fileCount = 0;
+/**
+ * 扫描指定目录的文件
+ * @param dirPath     目录位置
+ * @param ext         文件类型（可选）
+ * @returns {Array}   带目录结构的数组
+ */
 
-    const sourceDir = path.relative('.', sourceDirPath);
-    const distDir = distDirPath ? `${distDirPath}/post` : path.join('./export', path.basename(sourceDir));
+function getAllFiles(dirPath, ext) {
 
-    /**
-     * 文件过滤器
-     *
-     * @desc 过滤并拼合正确的路径
-     * @param dirList
-     * @param baseDir
-     */
-    function fileFilter(dirList, baseDir) {
-        return dirList
-            .filter(itemName => blackList.indexOf(itemName) === -1)
-            .map(itemName => `${baseDir}/${itemName}`);
-    }
+  function scandir(dirPath, ext) {
+    const result = readdirSync(dirPath);
+    if (!result.length) return [];
+    return result.filter(name => !(blackList || []).includes(name)).map((dirName) => {
+      const filePath = join(dirPath, dirName);
+      if (statSync(filePath).isDirectory()) {
+        return scandir(join(dirPath, dirName), ext);
+      } else {
+        if (!ext) return filePath;
+        if (filePath.lastIndexOf(ext) === filePath.indexOf(ext) && filePath.indexOf(ext) > -1) {
+          return filePath;
+        }
+        return '';
+      }
+    });
+  }
 
+  function flatten(arr) {
+    return arr.reduce(function(flat, toFlatten) {
+      return flat.concat(Array.isArray(toFlatten) ? flatten(toFlatten) : toFlatten);
+    }, []);
+  }
 
-    /**
-     * 目录过滤器
-     * @param targetDirs
-     */
-    function dirFilter(targetDirs) {
-        return targetDirs
-            .map((item, idx) => targetDirs.slice(0, idx + 1).join('/'))
-            .filter(item => item && item !== '.');
-    }
+  return flatten(scandir(dirPath, ext)).filter(file => file);
+}
 
+/**
+ * 使用文件后缀过滤文件
+ *
+ * @example filterFilesByExt([], '.md')
+ * @param fileList
+ * @param ext
+ * @returns {*}
+ */
+function filterFilesByExt(fileList, ext) {
+  return fileList.filter((name) => extname(name) === ext);
+}
 
-    /**
-     * 目录扫描
-     *
-     * @param baseDir
-     * @param distDir
-     * @param multipleProcessor
-     * @returns {Promise}
-     */
-    function scanDirs(baseDir, distDir, multipleProcessor) {
-        return new Promise(function (mainResolve, mainReject) {
-            readdir(baseDir, {encoding: charset}, function (err, dirList) {
-                if (err) {
-                    return mainReject(err);
-                }
+/**
+ * 转换文章内的代码片段
+ * @param source
+ * @returns {Promise}
+ */
+function codeParser(source) {
+  return new Promise(function(mainResolve) {
+    if (useCodeHighlight) {
 
-                return mainResolve(
-                    fileFilter(dirList, baseDir).reduce(function (promiseFactory, itemName) {
-                        return promiseFactory.then(function () {
-                            return new Promise(function (subResolve, subReject) {
-                                stat(itemName, function (readDirError, stats) {
-                                    if (err) {
-                                        return subReject(readDirError);
-                                    }
-                                    if (stats.isDirectory()) {
-                                        return subResolve(scanDirs(itemName, distDir, multipleProcessor));
-                                    } else if (stats.isFile()) {
-                                        if (itemName.slice(-3) === '.md') {
-                                            return subResolve(multipleProcessor.reduce(function (subPromiseFactory, preProcessor) {
-                                                const src = itemName;
-                                                const dist = path.join(distDir, path.relative(sourceDir, itemName));
-                                                return subPromiseFactory.then(preProcessor(src, dist));
-                                            }, Promise.resolve()));
-                                        } else {
-                                            return subResolve();
-                                        }
-                                    } else {
-                                        const error = 'unknown error';
-                                        log4scanDirs.error(error, itemName);
-                                        return subReject(error);
-                                    }
-                                });
-                            });
-                        });
-                    }, Promise.resolve())
-                );
+      const CodeWithoutLang = source.match(/```\n([\s\S\n]+?)\n```/);
+      const CodeWithLang = source.match(/```(\S+)\n([\s\S\n]+?)\n```/);
 
-            });
+      let lang = '';
+      let code = '';
+      let originText = '';
+
+      if (CodeWithLang) {
+        originText = CodeWithLang[0];
+        lang = CodeWithLang[1];
+        code = CodeWithLang[2];
+      } else if (CodeWithoutLang) {
+        originText = CodeWithoutLang[0];
+        code = CodeWithoutLang[1];
+      } else {
+        originText = '';
+        lang = '';
+        code = '';
+      }
+      return code ? mainResolve(new Promise(function(resolve, reject) {
+        const postData = {'code': lang ? `[crayon lang=${lang}]\n${code}\n[/crayon]\n` : `[crayon]\n${code}\n[/crayon]\n`};
+        post({url: config.codeHighLight.api, form: stringify(postData)}, function(err, httpResponse, body) {
+          if (err) {
+            console.log(err);
+            console.log(postData);
+            return reject(err);
+          }
+          return resolve(codeParser(source.replace(originText, '{{<crayonCode>}}\n' + body + '\n{{</crayonCode>}}')));
         });
+      })) : mainResolve(source);
+    } else {
+      return mainResolve(source);
     }
+  });
+}
 
+if (!existsSync('./cache.json')) writeFileSync('./cache.json', '{}');
+if (!existsSync('./cache')) mkdirSync('./cache');
 
+module.exports = (sourceDirPath, distDirPath, useCodeHighlight) => {
+
+  let cache;
+  try {
+    cache = require('./cache.json');
+  } catch (e) {
+    cache = {};
+    console.error('读取缓存文件失败。');
+  }
+
+  let categoriesStatistics = {result: []};
+  let fileCount = 0;
+
+  const sourceDir = relative('.', sourceDirPath);
+
+  function generateDesc(fileContent) {
     /**
-     * 检查是否有匹配的数据文件
-     *
-     * @param src
-     * @param dist
-     * @returns {Promise}
-     */
-    function matchMeta(src, dist) {
-        const meta = src.slice(0, -3) + '.json';
-        return new Promise(function (resolve, reject) {
-            stat(meta, function (err, stats) {
-                if (err || !stats.isFile()) {
-                    const error = `[${fileCount}][LOSE] meta json file: ${src}`;
-                    log4matchMeta.warn(error);
-                    return reject(error)
-                } else {
-                    fileCount++;
-                    if (!(debug.enable && fileCount > debug.maxFilesCount)) {
-                        log4matchMeta.log(`[${fileCount}] ${src}`);
-                        return generatePostContent(meta, src, dist, fileCount);
-                    } else {
-                        return resolve();
-                    }
-                }
-            });
-        });
-    }
-
-
-    function generateDesc(fileContent) {
-        /**
-         * 修正最后一行内容
-         * @param descResult
-         * @returns {*}
-         */
-        function fixLastLine(descResult) {
-            const lastLineNumber = descResult.length - 1;
-            const lastLine = descResult[lastLineNumber];
-            if (!lastLine) {
-                return [];
-            }
-            const lastWord = lastLine[lastLine.length - 1].trim();
-
-            if (lastLine.endsWith('诸如:') || lastLine.endsWith('诸如：')) {
-                // 将诸如结尾的内容干掉
-                descResult[lastLineNumber] = lastLine.substr(0, lastLine.lastIndexOf('诸如'));
-            } else if (['：', ':'].indexOf(lastWord) > -1) {
-                // 长段落内容最后结尾是冒号，替换为省略号。
-                descResult[lastLineNumber] = lastLine.substr(0, lastLine.length - 1) + '...';
-            } else if (lastLine.lastIndexOf('。') > -1 && lastLine.lastIndexOf('。') !== lastWord) {
-                // 句号后还有内容，直接抛弃。
-                descResult[lastLineNumber] = lastLine.substr(0, lastLine.lastIndexOf('。') + 1);
-            } else {
-                console.log('[---]', '未被处理的lastLine');
-                console.log(lastLine);
-            }
-            return descResult;
-        }
-
-        /**
-         * 获取描述内容
-         * @param descResult
-         * @returns {string}
-         */
-        function getResult(descResult) {
-            console.log(descResult)
-            if (descResult.length) {
-                let result = fixLastLine(descResult);
-                if (result.length > 3) {
-                    return result.slice(0, 3).join('');
-                } else {
-                    return result.join('');
-                }
-            } else {
-                return '';
-            }
-        }
-
-        let fileLines = fileContent ? fileContent.split('\n') : [];
-        let descResult = [];
-        let hasSkipHeadline = false;
-        if (!fileLines.length) {
-            return getResult(descResult);
-        }
-        for (let i = 0, j = fileLines.length; i < j; i++) {
-            const line = fileLines[i];
-            console.log(`${i} | ${line}`);
-
-            // 获取两个标题内的内容
-            if (line.match(/\s*?(#)+[\s\S]+/)) {
-                if (hasSkipHeadline) {
-                    return getResult(descResult);
-                }
-                hasSkipHeadline = true;
-            } else if (line.match(/^`{3}/)) {
-                // 跳过代码
-                return getResult(descResult);
-            } else if (line.match(/^\s*?$/)) {
-                // 跳过空行
-            } else if (line.match(/\s*?>\s+\*/)) {
-                // 跳过引用
-                return getResult(descResult);
-            } else if (line.match(/\s*?(\*|\-)\s+/)) {
-                // 跳过列表
-                return getResult(descResult);
-            } else if (line.match(/\s*?\d+\.\s+/)) {
-                // 跳过数字列表
-                return getResult(descResult);
-            } else if (line.match(/\s*?\|.+\|/)) {
-                // 跳过表格
-                return getResult(descResult);
-            } else if (line.match(/\s*?>.*]/)) {
-                // 跳过块引用
-                return getResult(descResult);
-            } else {
-                let saveLine = line
-                // strip
-                    .replace(/^\s+|\s+$/, '')
-                    // 去除链接文本的图片
-                    .replace(/\[!\[.+\]\(.+\)/g, '')
-                    // 摘出链接文本
-                    .replace(/\[([\s\S]+?)\]\(.*?\)/g, "[$1]")
-                    // 剔除图片
-                    .replace(/!\[.*\]\(.*\)/g, '')
-                    // 剔除``行内代码
-                    .replace(/`(.+?)`/g, '$1')
-                    // 干掉首行的块引用
-                    .replace(/^>\s+/, '')
-                    // 干掉**加粗
-                    .replace(/\*\*\*(.*?)\*\*\*/g, '$1')
-                    .replace(/\*\*(.*?)\*\*/g, '$1')
-                    // 去掉ins标签
-                    .replace(/<ins\s\S+>(.+?)<\/ins>/, '$1');
-
-                if (!line.match(/http:\/\//)) {
-                    saveLine = saveLine
-                    // 替换正则为字符串，hugo bug
-                        .replace(/(\W+)\/.*\/\w+(\W+)/, '$1正则$2')
-
-                }
-                // 将其他内容保存
-                if (saveLine) {
-                    descResult.push(saveLine);
-                }
-            }
-        }
-
-        return getResult(descResult);
-    }
-
-    /**
-     * 通过JSON内容生成文章头部数据信息
-     *
-     * @todo hugo未来会对这种内容支持越来越完善，但是有许多内容还是需要自己定制处理
-     * @param data
-     * @param fileContent
+     * 修正最后一行内容
+     * @param descResult
      * @returns {*}
      */
-    function generatePostHeaderMeta(data, fileContent, src) {
-        try {
-            let header = JSON.parse(data);
-            let tpl = [];
-            tpl.push('---');
-            tpl.push(`title: "${header.title}"`);
-            if (header.description) {
-                tpl.push(`description: "${header.description}"`);
-            } else {
-                tpl.push(`description: "${generateDesc(fileContent)}"`);
-            }
-            if (header.tag) {
-                tpl.push(`tags: [${JSON.stringify(header.tag).slice(1, -1)}]`);
-            }
+    function fixLastLine(descResult) {
+      const lastLineNumber = descResult.length - 1;
+      const lastLine = descResult[lastLineNumber];
 
-            const dateA = moment(header.date).tz('Asia/Shanghai').format('YYYY-MM-DDTHH:mm:ssZ');
+      if (!lastLine) return [];
 
-            tpl.push(`lastmod: "${dateA}"`);
-            tpl.push(`date: "${dateA}"`);
-            if (header.categories) {
+      const lastWord = lastLine[lastLine.length - 1].trim();
 
-                let catData = header.categories.map(function (item) {
-                    return item.slug;
-                });
+      if (lastLine.endsWith('诸如:') || lastLine.endsWith('诸如：')) {
+        // 将诸如结尾的内容干掉
+        descResult[lastLineNumber] = lastLine.substr(0, lastLine.lastIndexOf('诸如'));
+      } else if (['：', ':'].indexOf(lastWord) > -1) {
+        // 长段落内容最后结尾是冒号，替换为省略号。
+        descResult[lastLineNumber] = lastLine.substr(0, lastLine.length - 1) + '...';
+      } else if (lastLine.lastIndexOf('。') > -1 && lastLine.lastIndexOf('。') !== lastWord) {
+        // 句号后还有内容，直接抛弃。
+        descResult[lastLineNumber] = lastLine.substr(0, lastLine.lastIndexOf('。') + 1);
+      } else {
+        // todo 待完善
+        // console.log('[---]', '未被处理的lastLine');
+        // console.log(lastLine);
+      }
+      return descResult;
+    }
 
-                tpl.push(`topics: ${JSON.stringify(catData)}`);
+    /**
+     * 获取描述内容
+     * @param descResult
+     * @returns {string}
+     */
+    function getResult(descResult) {
+      // console.log(descResult);
 
-                header.categories.map(function (item) {
-                    if (!categoriesStatistics[item.slug]) {
-                        categoriesStatistics[item.slug] = true;
-                        if (showCategory) {
-                            console.log(item);
-                        }
-                    }
-                });
-            }
+      if (!descResult.length) return '';
 
-            const dateB = moment(header.created_at).tz('Asia/Shanghai').format('YYYY-MM-DDTHH:mm:ssZ');
-            const dateC = moment(header.updated_at).tz('Asia/Shanghai').format('YYYY-MM-DDTHH:mm:ssZ');
+      let result = fixLastLine(descResult);
 
-            tpl.push(`created: "${dateB}"`);
-            tpl.push(`updated: "${dateC}"`);
-            tpl.push(`dateForChinese: "${moment(header.created_at).format('YYYY年MM月DD日')}"`);
+      if (result.length > 3) {
+        result = result.slice(0, 3).join('');
+      } else {
+        result = result.join('');
+      }
 
-            if (header.alias) {
-                if (typeof header.alias === 'string') {
-                    tpl.push(`aliases:`);
+      result = result.
+          replace(/<em>/g, '').
+          replace(/<\/em>/g, '').
+          replace(/<strong>/g, '').
+          replace(/<\/strong>/g, '');
 
-                    let baseURI = '/';
+      return result;
+    }
 
-                    if (header.dataFormated) {
-                        baseURI = `/${header.dataFormated}/`;
-                    }
+    let fileLines = fileContent ? fileContent.split('\n') : [];
+    let descResult = [];
+    let hasSkipHeadline = false;
 
-                    if (header.alias.indexOf('/') === 0) {
-                        tpl.push(`    - ${baseURI}${header.alias}`);
-                        tpl.push(`    - ${baseURI}${header.alias}.html`);
-                    } else {
-                        tpl.push(`    - ${baseURI}${header.alias}`);
-                        tpl.push(`    - ${baseURI}${header.alias}.html`);
-                    }
-                }
-            }
+    if (!fileLines.length) return getResult(descResult);
 
-            if (header.status) {
-                tpl.push(`draft: ${header.status !== 'published'}`);
-            }
+    for (let i = 0, j = fileLines.length; i < j; i++) {
+      const line = fileLines[i];
+      // console.log(`${i} | ${line}`);
 
-            tpl.push(`isCJKLanguage: true`);
+      // 获取两个标题内的内容
+      if (line.match(/\s*?(#)+[\s\S]+/)) {
+        if (hasSkipHeadline) getResult(descResult);
+        hasSkipHeadline = true;
+      } else if (line.match(/^`{3}/)) {
+        // 跳过代码
+        return getResult(descResult);
+      } else if (line.match(/^\s*?$/)) {
+        // 跳过空行
+      } else if (line.match(/\s*?>\s+\*/)) {
+        // 跳过引用
+        return getResult(descResult);
+      } else if (line.match(/\s*?(\*|\-)\s+/)) {
+        // 跳过列表
+        return getResult(descResult);
+      } else if (line.match(/\s*?\d+\.\s+/)) {
+        // 跳过数字列表
+        return getResult(descResult);
+      } else if (line.match(/\s*?\|.+\|/)) {
+        // 跳过表格
+        return getResult(descResult);
+      } else if (line.match(/\s*?>.*]/)) {
+        // 跳过块引用
+        return getResult(descResult);
+      } else {
+        let saveLine = line
+        // strip
+            .replace(/^\s+|\s+$/, '')
+            // 去除链接文本的图片
+            .replace(/\[!\[.+\]\(.+\)/g, '')
+            // 摘出链接文本
+            .replace(/\[([\s\S]+?)\]\(.*?\)/g, '[$1]')
+            // 剔除图片
+            .replace(/!\[.*\]\(.*\)/g, '')
+            // 剔除``行内代码
+            .replace(/`(.+?)`/g, '$1')
+            // 干掉首行的块引用
+            .replace(/^>\s+/, '')
+            // 干掉**加粗
+            .replace(/\*\*\*(.*?)\*\*\*/g, '$1').replace(/\*\*(.*?)\*\*/g, '$1')
+            // 去掉ins标签
+            .replace(/<ins\s\S+>(.+?)<\/ins>/, '$1');
 
-            var gitInfo = revision(src).split('\n');
-            if (gitInfo[0]) {
-                tpl.push(`gitComment: "${gitInfo[0]}"`);
-                tpl.push(`gitFile: "${src}"`);
-            }
-            if (gitInfo[1]) {
-                tpl.push(`gitLabel: "${gitInfo[1]}"`);
-            }
-
-            tpl.push(`slug: "${header.slug}"`);
-            tpl.push('---');
-
-            // @todo 处理暂时未使用meta info
-            // {
-            //     "image": null,
-            //     "page": 0,
-            // }
-
-            // @todo 数据可用和数据失真
-            // "date": "Sun, 26 Aug 2007 09:27:27 +0000",
-            // "dataFormated": "2007/08/26",
-
-            return Promise.resolve(tpl.join('\n') + '\n\n');
-        } catch (e) {
-            log4makeHeader.error(`[error] make header ${e}`);
-            return Promise.resolve(false);
+        if (!line.match(/http:\/\//)) {
+          // 替换正则为字符串，hugo bug
+          saveLine = saveLine.replace(/(\W+)\/.*\/\w+(\W+)/, '$1正则$2');
         }
-    }
-
-    /**
-     * 转换文章内的代码片段
-     * @param source
-     * @returns {Promise}
-     */
-    function codeParser(source) {
-        return new Promise(function (mainResolve) {
-            if (useCodeHighlight) {
-
-                const CodeWithoutLang = source.match(/```\n([\s\S\n]+?)\n```/);
-                const CodeWithLang = source.match(/```(\S+)\n([\s\S\n]+?)\n```/);
-
-                let lang = '';
-                let code = '';
-                let originText = '';
-
-                if (CodeWithLang) {
-                    originText = CodeWithLang[0];
-                    lang = CodeWithLang[1];
-                    code = CodeWithLang[2];
-                } else if (CodeWithoutLang) {
-                    originText = CodeWithoutLang[0];
-                    code = CodeWithoutLang[1];
-                } else {
-                    originText = '';
-                    lang = '';
-                    code = '';
-                }
-                return code ? mainResolve(new Promise(function (resolve, reject) {
-                    const postData = {
-                        'code': lang ? `[crayon lang=${lang}]\n${code}\n[/crayon]\n` : `[crayon]\n${code}\n[/crayon]\n`
-                    };
-                    request.post({
-                        url: 'http://127.0.0.1:1234/?api',
-                        form: querystring.stringify(postData)
-                    }, function (err, httpResponse, body) {
-                        if (err) {
-                            console.log(err);
-                            console.log(postData);
-                            return reject(err);
-                        }
-                        return resolve(codeParser(source.replace(originText, '{{<crayonCode>}}\n' + body + '\n{{</crayonCode>}}')));
-                    });
-                })) : mainResolve(source);
-            } else {
-                return mainResolve(source);
-            }
-        });
-    }
-
-
-    /**
-     * 获取文件hash
-     * @param pathToFile
-     * @returns {Array}
-     */
-    function revision(pathToFile) {
-        var data = child_process.execSync(`cd ${path.dirname(pathToFile)};git log -n 1 --pretty=format:'%h\n%s' "${path.basename(pathToFile)}"`).toString().trim();
-        try {
-            return data;
-        } catch (e) {
-            return [];
+        // 将其他内容保存
+        if (saveLine) {
+          descResult.push(saveLine);
         }
+      }
     }
 
+    return getResult(descResult);
+  }
 
-    /**
-     * 生成文章内容
-     *
-     * @param meta
-     * @param src
-     * @param dist
-     * @param idx
-     * @returns {Promise}
-     */
-    function generatePostContent(meta, src, dist, idx) {
+  /**
+   * 获取文件hash
+   * @param pathToFile
+   * @returns {Array}
+   */
+  // todo
+  function revision(pathToFile) {
+    var data = execSync(`cd ${dirname(pathToFile)};git log -n 1 --pretty=format:'%h\n%s' "${basename(pathToFile)}"`).toString().trim();
+    try {
+      return data;
+    } catch (e) {
+      return [];
+    }
+  }
 
-        return new Promise(function (resolve, reject) {
-            readFile(meta, charset, function (err, metaContent) {
-                readFile(src, charset, function (err, fileContent) {
+  /**
+   * 生成文章信息内容模板
+   * @param data
+   * @param fileContent
+   * @param src
+   * @returns {*}
+   */
+  function generatePostMetaTemplate(data, fileContent, src) {
 
-                    dirFilter(dist.split('/').slice(0, -1)).forEach(function (dirPath) {
-                        if (!existsSync(dirPath)) {
-                            return mkdirSync(dirPath);
-                        }
-                    });
+    let header;
 
-                    Promise.all([generatePostHeaderMeta(metaContent, fileContent, src), codeParser(fileContent)]).then(function (contents) {
-                        if (contents.length === 2 && contents[0] && contents[1]) {
-                            let content = contents.join('');
-
-                            if (content) {
-                                writeFile(dist, content, charset, function (err) {
-                                    if (err) {
-                                        const error = `write file error: ${src}`;
-                                        log4process.error(error);
-                                        return reject(error);
-                                    }
-                                    const message = `[${idx}][done] ${dist}`;
-                                    log4process.log(message);
-                                    return resolve(message);
-                                });
-                            } else {
-                                const message = `[${idx}][NEED META] ${src}`;
-                                log4process.warn(message);
-                                return resolve(message);
-                            }
-                        }
-                    }).catch(function (error) {
-                        return reject(error);
-                    });
-
-                });
-            });
-        });
+    try {
+      header = JSON.parse(data);
+    } catch (e) {
+      log4makeHeader.error(`[error] make header ${e}`);
+      return Promise.resolve(false);
     }
 
+    let tpl = [];
+    tpl.push('---');
+    tpl.push(`title: "${header.title}"`);
+    if (header.description) {
+      tpl.push(`description: "${header.description}"`);
+    } else {
+      tpl.push(`description: "${generateDesc(fileContent)}"`);
+    }
+    if (header.tag) {
+      tpl.push(`tags: [${JSON.stringify(header.tag).slice(1, -1)}]`);
+    }
 
-    scanDirs(sourceDir, distDir, [matchMeta]).then(function (error) {
-        return error ? console.log(`${error}`) : console.log('done.');
-    }).catch(function (error) {
-        console.log('error', error)
+    const dateA = moment(header.date).tz(timezone).format('YYYY-MM-DDTHH:mm:ssZ');
+    const dateB = moment(header.created_at).tz(timezone).format('YYYY-MM-DDTHH:mm:ssZ');
+    const dateC = moment(header.updated_at).tz(timezone).format('YYYY-MM-DDTHH:mm:ssZ');
+
+    // 以建日期为准
+    if (new Date(header.date) > new Date(header.created_at)) {
+      tpl.push(`date: "${dateB}"`);
+    } else {
+      tpl.push(`date: "${dateA}"`);
+    }
+
+    tpl.push(`lastmod: "${dateA}"`);
+    tpl.push(`created: "${dateB}"`);
+    tpl.push(`updated: "${dateC}"`);
+    tpl.push(`dateForChinese: "${moment(header.created_at).format('YYYY年MM月DD日')}"`);
+
+    if (header.categories) {
+      let catData = header.categories.map((item) => item.slug);
+
+      tpl.push(`topics: ${JSON.stringify(catData)}`);
+
+      header.categories.map((item) => {
+        if (!categoriesStatistics[item.slug]) {
+          categoriesStatistics[item.slug] = true;
+          if (showCategory) console.log(item);
+        }
+      });
+    }
+
+    if (header.alias) {
+      if (typeof header.alias === 'string') {
+        tpl.push(`aliases:`);
+
+        let baseURI = '/';
+
+        if (header.dataFormated) {
+          baseURI = `/${header.dataFormated}/`;
+        }
+
+        if (header.alias.indexOf('/') === 0) {
+          tpl.push(`    - ${baseURI}${header.alias}`);
+          tpl.push(`    - ${baseURI}${header.alias}.html`);
+        } else {
+          tpl.push(`    - ${baseURI}${header.alias}`);
+          tpl.push(`    - ${baseURI}${header.alias}.html`);
+        }
+      }
+    }
+
+    if (header.status) {
+      tpl.push(`draft: ${header.status !== 'published'}`);
+    }
+
+    tpl.push(`isCJKLanguage: true`);
+
+    var gitInfo = revision(src).split('\n');
+    if (gitInfo[0]) {
+      tpl.push(`gitComment: "${gitInfo[0]}"`);
+      tpl.push(`gitFile: "${src}"`);
+    }
+    if (gitInfo[1]) {
+      tpl.push(`gitLabel: "${gitInfo[1]}"`);
+    }
+
+    tpl.push(`slug: "${header.slug}"`);
+    tpl.push('---');
+
+    // @todo 处理暂时未使用meta info
+    // {
+    //     "image": null,
+    //     "page": 0,
+    // }
+
+    // @todo 数据可用和数据失真
+    // "date": "Sun, 26 Aug 2007 09:27:27 +0000",
+    // "dataFormated": "2007/08/26",
+
+    return Promise.resolve(tpl.join('\n') + '\n\n');
+
+  }
+
+  /**
+   * 生成文章内容
+   * @param params
+   * @returns {Promise<any>}
+   */
+  function mixParsedContent(params) {
+
+    const {metaContent, postContent, postFile, distFile, idx} = params;
+
+    return new Promise(function(resolve, reject) {
+
+      dirFilter(distFile.split('/').slice(0, -1)).forEach((dirPath) => {
+        if (!existsSync(dirPath)) return mkdirSync(dirPath);
+      });
+
+      Promise.
+          all([
+            generatePostMetaTemplate(metaContent, postContent, postFile),
+            codeParser(postContent),
+          ]).then(function(contents) {
+
+        if (contents.length === 2 && contents[0] && contents[1]) {
+          let content = contents.join('');
+          if (content) {
+
+            try {
+              writeFileSync(distFile, content, {encoding: charset});
+              fileCount++;
+              const message = `[${(fileCount / allPostFiles.length * 100).toFixed(2)}%] [${idx}] [done] ${distFile}`;
+              log4process.log(message);
+              return resolve(message);
+            } catch (e) {
+              const error = `write file error: ${postFile}`;
+              log4process.error(error);
+              return reject(error);
+            }
+          } else {
+            const message = `[${idx}] [NEED META] ${postFile}`;
+            log4process.warn(message);
+            return resolve(message);
+          }
+        }
+
+      }).catch((error) => reject(error));
     });
+  }
 
+  /**
+   * 开始处理流程
+   */
+
+  const allFiles = getAllFiles(sourceDir);
+  const allPostFiles = filterFilesByExt(allFiles, '.md');
+  const allCachedFiles = filterFilesByExt(getAllFiles('./cache'), '.md');
+
+  // 扫描目录存在的md文件
+  if (allPostFiles.length === 0) {
+    log4scanDirs.warn('指定目录未发现`.md`文件');
+    process.exit(1);
+  }
+
+  // 检查是否存在缓存与数据源不一致的情况
+  const willCachedFiles = allPostFiles.map((file) => join('./cache', file.replace(/\.\.\//g, '')));
+  const willDeleteFiles = allCachedFiles.filter((file) => !willCachedFiles.includes(file));
+
+  if (willDeleteFiles.length) {
+    console.log('清理缓存目录中过期的文件', willDeleteFiles);
+    willDeleteFiles.forEach((file) => unlinkSync(file));
+  }
+
+  // 检查是否有存在缺少元文件的文档
+  const postsWithoutMetaFile = allPostFiles.
+      map((name) => `${dirname(name)}/${basename(name, '.md')}.json`).filter((name) => !existsSync(name));
+  if (postsWithoutMetaFile.length) {
+    log4matchMeta.error('存在缺失Meta文件的文章', postsWithoutMetaFile);
+    process.exit(1);
+  }
+
+  // 检查是否有多余的元文件
+  const metaFilesWithoutPostFile = filterFilesByExt(allFiles, '.json').
+      map((name) => `${dirname(name)}/${basename(name, '.json')}.md`).filter((name) => !existsSync(name));
+  if (postsWithoutMetaFile.length) {
+    log4matchMeta.error('存在多余的MetaFiles', metaFilesWithoutPostFile);
+    process.exit(2);
+  }
+
+  // 开始处理文件
+  allPostFiles.forEach((postFile, idx) => {
+
+    const postContent = readFileSync(postFile, 'utf-8');
+    const metaFile = `${dirname(postFile)}/${basename(postFile, '.md')}.json`;
+    const metaContent = readFileSync(metaFile, 'utf-8');
+    const distFile = join('./cache', postFile.replace(/\.\.\//g, '')).replace(/^\//g, '');
+
+    const checksum = sign(`${postContent}\n${pkg.version}\n${metaContent}`);
+
+    if (cache.hasOwnProperty(distFile) && cache[distFile] === checksum) {
+      fileCount++;
+      return log4process.log(`[${(fileCount / allPostFiles.length * 100).toFixed(2)}%] [跳过处理] ${postFile}`);
+    }
+
+    cache[distFile] = checksum;
+    return mixParsedContent({metaContent, postContent, postFile, distFile, idx});
+  });
+
+  writeFileSync('./cache.json', JSON.stringify(cache));
 };

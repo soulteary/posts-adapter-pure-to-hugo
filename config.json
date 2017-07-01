@@ -4,21 +4,24 @@
     ".git",
     ".gitignore",
     "README.json",
-    "README.md",
-
-
-
-    "2009",
-    "2010",
-    "2011",
-    "2012"
-
-
+    "README.md"
 
   ],
+  "timezone": "Asia/Shanghai",
   "charset": "utf-8",
   "debug": {
     "enable": false,
-    "maxFilesCount": 1
-  }
+    "maxFilesCount": 1,
+    "showCategory": false
+  },
+  "codeHighLight": {
+    "api": "http://127.0.0.1:1234/?api"
+  },
+  "jobs": [
+    {
+      "source": "../My-Blog-Posts",
+      "hl": true,
+      "dist": "../blog-2017/content"
+    }
+  ]
 }

@@ -1,21 +1,3 @@
 #!/usr/bin/env node
-let cmd = require('commander');
-let convert = require('../convert');
-let archives = require('../archives');
-let pkg = require('../package.json');
 
-cmd
-    .version(pkg.version)
-    .option('-ch, --custom-highlight', 'Enable custom highlight.')
-    .option('-s, --source [path]', 'Source dir.')
-    .option('-d, --dist [path]', 'dist dir.')
-    .usage('<exportFile Path> or <exportFile Path>')
-    .parse(process.argv);
-
-if (!cmd.args.length || cmd.args.length > 4 || !cmd.source) {
-  cmd.help();
-  process.exit();
-}
-
-convert(cmd.source, cmd.dist, cmd.customHighlight);
-archives(cmd.source, cmd.dist);
+require('./entry');

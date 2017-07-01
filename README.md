@@ -25,3 +25,9 @@ run `npm run convert --source=<your posts dir> [--custom-highlight=1]`
   }
 }
 ```
+
+## 使用方法
+
+```
+./bin/convert --source=../My-Blog-Posts --custom-highlight=1 --dist=../blog-2017/content
+```

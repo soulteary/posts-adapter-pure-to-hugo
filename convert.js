@@ -13,7 +13,7 @@ const config = require('./config.json');
 const pkg = require('./package');
 
 // 忽略文件列表、文件编码、调试模式
-const {blackList, charset, debug, timezone} = config;
+const {blackList, charset, debug, timezone, cache} = config;
 
 const moment = require('moment');
 const momentTimezone = require('moment-timezone');
@@ -51,16 +51,15 @@ function dirFilter(targetDirs) {
  * @param ext         文件类型（可选）
  * @returns {Array}   带目录结构的数组
  */
-
 function getAllFiles(dirPath, ext) {
 
-  function scandir(dirPath, ext) {
+  function scanDir(dirPath, ext) {
     const result = readdirSync(dirPath);
     if (!result.length) return [];
     return result.filter(name => !(blackList || []).includes(name)).map((dirName) => {
       const filePath = join(dirPath, dirName);
       if (statSync(filePath).isDirectory()) {
-        return scandir(join(dirPath, dirName), ext);
+        return scanDir(join(dirPath, dirName), ext);
       } else {
         if (!ext) return filePath;
         if (filePath.lastIndexOf(ext) === filePath.indexOf(ext) && filePath.indexOf(ext) > -1) {
@@ -77,7 +76,7 @@ function getAllFiles(dirPath, ext) {
     }, []);
   }
 
-  return flatten(scandir(dirPath, ext)).filter(file => file);
+  return flatten(scanDir(dirPath, ext)).filter(file => file);
 }
 
 /**
@@ -95,9 +94,10 @@ function filterFilesByExt(fileList, ext) {
 /**
  * 转换文章内的代码片段
  * @param source
+ * @param useCodeHighlight
  * @returns {Promise}
  */
-function codeParser(source) {
+function codeParser(source, useCodeHighlight) {
   return new Promise(function(mainResolve) {
     if (useCodeHighlight) {
 
@@ -137,16 +137,17 @@ function codeParser(source) {
   });
 }
 
-if (!existsSync('./cache.json')) writeFileSync('./cache.json', '{}');
-if (!existsSync('./cache')) mkdirSync('./cache');
+if (!existsSync(cache.database)) writeFileSync(cache.database, '{}');
+if (!existsSync(cache.rootDir)) mkdirSync(cache.rootDir);
 
+// todo cli invoke compatibility
 module.exports = (sourceDirPath, distDirPath, useCodeHighlight) => {
 
-  let cache;
+  let cacheData;
   try {
-    cache = require('./cache.json');
+    cacheData = require(cache.database);
   } catch (e) {
-    cache = {};
+    cacheData = {};
     console.error('读取缓存文件失败。');
   }
 
@@ -424,7 +425,7 @@ module.exports = (sourceDirPath, distDirPath, useCodeHighlight) => {
       Promise.
           all([
             generatePostMetaTemplate(metaContent, postContent, postFile),
-            codeParser(postContent),
+            codeParser(postContent, useCodeHighlight),
           ]).then(function(contents) {
 
         if (contents.length === 2 && contents[0] && contents[1]) {
@@ -459,7 +460,7 @@ module.exports = (sourceDirPath, distDirPath, useCodeHighlight) => {
 
   const allFiles = getAllFiles(sourceDir);
   const allPostFiles = filterFilesByExt(allFiles, '.md');
-  const allCachedFiles = filterFilesByExt(getAllFiles('./cache'), '.md');
+  const allCachedFiles = filterFilesByExt(getAllFiles(cache.rootDir), '.md');
 
   // 扫描目录存在的md文件
   if (allPostFiles.length === 0) {
@@ -468,7 +469,7 @@ module.exports = (sourceDirPath, distDirPath, useCodeHighlight) => {
   }
 
   // 检查是否存在缓存与数据源不一致的情况
-  const willCachedFiles = allPostFiles.map((file) => join('./cache', file.replace(/\.\.\//g, '')));
+  const willCachedFiles = allPostFiles.map((file) => join(cache.rootDir, file.replace(/\.\.\//g, '')));
   const willDeleteFiles = allCachedFiles.filter((file) => !willCachedFiles.includes(file));
 
   if (willDeleteFiles.length) {
@@ -495,21 +496,21 @@ module.exports = (sourceDirPath, distDirPath, useCodeHighlight) => {
   // 开始处理文件
   allPostFiles.forEach((postFile, idx) => {
 
-    const postContent = readFileSync(postFile, 'utf-8');
+    const postContent = readFileSync(postFile, charset);
     const metaFile = `${dirname(postFile)}/${basename(postFile, '.md')}.json`;
-    const metaContent = readFileSync(metaFile, 'utf-8');
-    const distFile = join('./cache', postFile.replace(/\.\.\//g, '')).replace(/^\//g, '');
+    const metaContent = readFileSync(metaFile, charset);
+    const distFile = join(cache.rootDir, postFile.replace(/\.\.\//g, '')).replace(/^\//g, '');
 
     const checksum = sign(`${postContent}\n${pkg.version}\n${metaContent}`);
 
-    if (cache.hasOwnProperty(distFile) && cache[distFile] === checksum) {
+    if (cacheData.hasOwnProperty(distFile) && cacheData[distFile] === checksum) {
       fileCount++;
       return log4process.log(`[${(fileCount / allPostFiles.length * 100).toFixed(2)}%] [跳过处理] ${postFile}`);
     }
 
-    cache[distFile] = checksum;
+    cacheData[distFile] = checksum;
     return mixParsedContent({metaContent, postContent, postFile, distFile, idx});
   });
 
-  writeFileSync('./cache.json', JSON.stringify(cache));
+  writeFileSync(cache.database, JSON.stringify(cacheData));
 };

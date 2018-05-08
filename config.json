@@ -1,22 +1,33 @@
 {
+  "//": "忽略的文件列表",
+  "//": "可以填写`20XX`等年月日归档目录",
   "blackList": [
     ".DS_Store",
     ".git",
     ".gitignore",
     "README.json",
     "README.md"
-
   ],
+  "//": "时间转换使用的时区",
   "timezone": "Asia/Shanghai",
+  "//": "读写文件使用的编码",
   "charset": "utf-8",
+  "//": "调试信息",
   "debug": {
     "enable": false,
     "maxFilesCount": 1,
     "showCategory": false
   },
+  "//": "外部代码高亮接口地址",
   "codeHighLight": {
     "api": "http://127.0.0.1:1234/?api"
   },
+  "//": "缓存目录",
+  "cache": {
+    "rootDir": "./cache",
+    "database": "./cache.json"
+  },
+  "//": "要转换的数据源",
   "jobs": [
     {
       "source": "../My-Blog-Posts",

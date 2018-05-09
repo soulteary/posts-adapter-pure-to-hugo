@@ -8,6 +8,7 @@ const {basename, extname, dirname, join, relative} = require('path');
 const {createHmac} = require('crypto');
 const {execSync} = require('child_process');
 const {stringify} = require('querystring');
+const {chunk} = require('lodash');
 
 const config = require('./config.json');
 const pkg = require('./package');
@@ -92,49 +93,69 @@ function filterFilesByExt(fileList, ext) {
 }
 
 /**
+ * 获取文件hash
+ * @param pathToFile
+ * @returns {Array}
+ */
+function revision(pathToFile) {
+  try {
+    return execSync(`cd ${dirname(pathToFile)};git log -n 1 --pretty=format:'%h\n%s' "${basename(pathToFile)}"`).toString().trim();
+  } catch (e) {
+    return [];
+  }
+}
+
+/**
  * 转换文章内的代码片段
  * @param source
- * @param useCodeHighlight
  * @returns {Promise}
  */
-function codeParser(source, useCodeHighlight) {
-  return new Promise(function(mainResolve) {
-    if (useCodeHighlight) {
+function codeParser(source) {
+  // 递归处理当前数据中的高亮代码
+  // 优先处理定义语言类型的段落块，避免匹配方式查找出错
+  return new Promise((resolve, reject) => {
 
-      const CodeWithoutLang = source.match(/```\n([\s\S\n]+?)\n```/);
-      const CodeWithLang = source.match(/```(\S+)\n([\s\S\n]+?)\n```/);
+    const CodeTypeDefined = source.match(/```(\S+)\n([\s\S\n]+?)\n```+?/);
+    const CodeTypeUndefined = source.match(/```\n([\s\S\n]+?)\n```+?/);
 
-      let lang = '';
-      let code = '';
-      let originText = '';
+    let originText, lang, code;
 
-      if (CodeWithLang) {
-        originText = CodeWithLang[0];
-        lang = CodeWithLang[1];
-        code = CodeWithLang[2];
-      } else if (CodeWithoutLang) {
-        originText = CodeWithoutLang[0];
-        code = CodeWithoutLang[1];
-      } else {
-        originText = '';
-        lang = '';
-        code = '';
-      }
-      return code ? mainResolve(new Promise(function(resolve, reject) {
-        const postData = {'code': lang ? `[crayon lang=${lang}]\n${code}\n[/crayon]\n` : `[crayon]\n${code}\n[/crayon]\n`};
-        post({url: config.codeHighLight.api, form: stringify(postData)}, function(err, httpResponse, body) {
-          if (err) {
-            console.log(err);
-            console.log(postData);
-            return reject(err);
-          }
-          return resolve(codeParser(source.replace(originText, '{{<crayonCode>}}\n' + body + '\n{{</crayonCode>}}')));
-        });
-      })) : mainResolve(source);
+    if (CodeTypeDefined) {
+      [originText, lang, code] = CodeTypeDefined;
+    } else if (CodeTypeUndefined) {
+      // lang 注定不存在
+      [originText, code, lang] = CodeTypeUndefined;
     } else {
-      return mainResolve(source);
+      // 查找不到匹配内容，返回传入数据
+      return resolve(source);
     }
+
+    if (!code) return resolve(source);
+
+    // todo 清理未明确定义的代码片段
+    const postData = {'code': `[crayon lang=${lang ? lang : 'text'}]\n${code}\n[/crayon]\n`};
+
+    post({url: config.codeHighLight.api, form: stringify(postData)}, (err, httpResponse, body) => {
+      if (err) {
+        console.log('code:', httpResponse && httpResponse.statusCode);
+        console.log(err);
+        console.log(`-----Invoke Params------`);
+        console.log({originText, lang, code});
+        console.log(`-----Post Data------`);
+        console.log(postData);
+        console.log();
+        console.log();
+        return reject(err);
+      }
+
+      if (Number(httpResponse.statusCode) !== 200) {
+        console.log('接口状态不正确，重新渲染', httpResponse.statusCode);
+        return resolve(codeParser(source));
+      }
+      return resolve(codeParser(source.replace(originText, '{{<crayonCode>}}\n' + body + '\n{{</crayonCode>}}')));
+    });
   });
+
 }
 
 if (!existsSync(cache.database)) writeFileSync(cache.database, '{}');
@@ -282,21 +303,6 @@ module.exports = (sourceDirPath, distDirPath, useCodeHighlight) => {
   }
 
   /**
-   * 获取文件hash
-   * @param pathToFile
-   * @returns {Array}
-   */
-  // todo
-  function revision(pathToFile) {
-    var data = execSync(`cd ${dirname(pathToFile)};git log -n 1 --pretty=format:'%h\n%s' "${basename(pathToFile)}"`).toString().trim();
-    try {
-      return data;
-    } catch (e) {
-      return [];
-    }
-  }
-
-  /**
    * 生成文章信息内容模板
    * @param data
    * @param fileContent
@@ -412,46 +418,40 @@ module.exports = (sourceDirPath, distDirPath, useCodeHighlight) => {
    * @param params
    * @returns {Promise<any>}
    */
-  function mixParsedContent(params) {
+  async function mixParsedContent(params) {
 
     const {metaContent, postContent, postFile, distFile, idx} = params;
 
-    return new Promise(function(resolve, reject) {
-
-      dirFilter(distFile.split('/').slice(0, -1)).forEach((dirPath) => {
-        if (!existsSync(dirPath)) return mkdirSync(dirPath);
-      });
-
-      Promise.
-          all([
-            generatePostMetaTemplate(metaContent, postContent, postFile),
-            codeParser(postContent, useCodeHighlight),
-          ]).then(function(contents) {
-
-        if (contents.length === 2 && contents[0] && contents[1]) {
-          let content = contents.join('');
-          if (content) {
-
-            try {
-              writeFileSync(distFile, content, {encoding: charset});
-              fileCount++;
-              const message = `[${(fileCount / allPostFiles.length * 100).toFixed(2)}%] [${idx}] [done] ${distFile}`;
-              log4process.log(message);
-              return resolve(message);
-            } catch (e) {
-              const error = `write file error: ${postFile}`;
-              log4process.error(error);
-              return reject(error);
-            }
-          } else {
-            const message = `[${idx}] [NEED META] ${postFile}`;
-            log4process.warn(message);
-            return resolve(message);
-          }
-        }
-
-      }).catch((error) => reject(error));
+    dirFilter(distFile.split('/').slice(0, -1)).forEach((dirPath) => {
+      if (!existsSync(dirPath)) return mkdirSync(dirPath);
     });
+
+    const metaPart = await generatePostMetaTemplate(metaContent, postContent, postFile);
+    const postPart = useCodeHighlight ? await codeParser(postContent) : postContent;
+
+    if (!metaPart || !postPart) {
+      const error = `文件数据有问题: ${postFile}`;
+      log4process.error(error);
+      return error;
+    }
+    let content = [metaPart, postPart].join('');
+    if (content) {
+      try {
+        writeFileSync(distFile, content, {encoding: charset});
+        fileCount++;
+        const message = `[${(fileCount / allPostFiles.length * 100).toFixed(2)}%] [${idx}] [done] ${distFile}`;
+        log4process.log(message);
+        return message;
+      } catch (e) {
+        const error = `write file error: ${postFile}`;
+        log4process.error(error);
+        return error;
+      }
+    } else {
+      const message = `[${idx}] [NEED META] ${postFile}`;
+      log4process.warn(message);
+      return message;
+    }
   }
 
   /**
@@ -494,23 +494,45 @@ module.exports = (sourceDirPath, distDirPath, useCodeHighlight) => {
   }
 
   // 开始处理文件
-  allPostFiles.forEach((postFile, idx) => {
+  // 并发
+  const concurrence = 3;
+  const allPostFileChunks = chunk(allPostFiles, concurrence);
 
-    const postContent = readFileSync(postFile, charset);
-    const metaFile = `${dirname(postFile)}/${basename(postFile, '.md')}.json`;
-    const metaContent = readFileSync(metaFile, charset);
-    const distFile = join(cache.rootDir, postFile.replace(/\.\.\//g, '')).replace(/^\//g, '');
+  allPostFileChunks.reduce((promiseFactory, jobGroup, jobGroupIdx) => {
+    return promiseFactory.then(() => {
+      return Promise.all[jobGroup.map(async (postFile, jobIdx) => {
 
-    const checksum = sign(`${postContent}\n${pkg.version}\n${metaContent}`);
+        const postContent = readFileSync(postFile, charset);
+        const metaFile = `${dirname(postFile)}/${basename(postFile, '.md')}.json`;
+        const metaContent = readFileSync(metaFile, charset);
+        const distFile = join(cache.rootDir, postFile.replace(/\.\.\//g, '')).replace(/^\//g, '');
+        const checksum = sign(`${postContent}\n${pkg.version}\n${metaContent}`);
 
-    if (cacheData.hasOwnProperty(distFile) && cacheData[distFile] === checksum) {
-      fileCount++;
-      return log4process.log(`[${(fileCount / allPostFiles.length * 100).toFixed(2)}%] [跳过处理] ${postFile}`);
-    }
+        // TODO: recheck cache file
+        // if (!existsSync(distFile)) {
+        //   log4process.warn('缺少缓存文件', distFile);
+        //   process.exit(1);
+        // }
+        // const distChecksum = sign(readFileSync(distFile, charset));
 
-    cacheData[distFile] = checksum;
-    return mixParsedContent({metaContent, postContent, postFile, distFile, idx});
-  });
+        // 如果缓存数据包含输出文件地址，缓存文件存在，并且缓存数据指纹未变化
+        if (cacheData.hasOwnProperty(distFile) &&
+            cacheData[distFile] === checksum &&
+            // todo check dist file checksum
+            existsSync(distFile)
+        ) {
+          fileCount++;
+          return log4process.log(`[${(fileCount / allPostFiles.length * 100).toFixed(2)}%] [跳过处理] ${postFile}`);
+        }
+
+        cacheData[distFile] = checksum;
+
+        const idx = jobGroupIdx * concurrence + jobIdx + 1;
+        return await mixParsedContent({metaContent, postContent, postFile, distFile, idx});
+
+      })];
+    });
+  }, Promise.resolve());
 
   writeFileSync(cache.database, JSON.stringify(cacheData));
 };

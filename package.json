@@ -20,6 +20,7 @@
   "homepage": "https://github.com/soulteary/posts-adapter-pure-to-hugo#readme",
   "dependencies": {
     "commander": "2.9.0",
+    "lodash": "4.17.10",
     "moment": "2.18.1",
     "moment-timezone": "0.5.13",
     "request": "2.81.0",

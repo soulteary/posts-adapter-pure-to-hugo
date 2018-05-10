@@ -27,8 +27,6 @@
     "lodash": "4.17.10",
     "moment": "2.18.1",
     "moment-timezone": "0.5.13",
-    "prettier": "1.12.1",
-    "request": "2.81.0",
-    "scandirectory": "3.0.1"
+    "request": "2.81.0"
   }
 }

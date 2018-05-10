@@ -32,7 +32,7 @@ const {showCategory} = debug;
 /**
  * 计算文件Hash
  * @param data
- * @returns {string}
+ * @return {string}
  */
 function sign(data) {
   return createHmac('md5', data).digest('hex');
@@ -43,21 +43,20 @@ function sign(data) {
  * @param targetDirs
  */
 function dirFilter(targetDirs) {
-  return targetDirs.map((item, idx) => targetDirs.slice(0, idx + 1).join('/')).filter(item => item && item !== '.');
+  return targetDirs.map((item, idx) => targetDirs.slice(0, idx + 1).join('/')).filter((item) => item && item !== '.');
 }
 
 /**
  * 扫描指定目录的文件
  * @param dirPath     目录位置
  * @param ext         文件类型（可选）
- * @returns {Array}   带目录结构的数组
+ * @return {Array}   带目录结构的数组
  */
 function getAllFiles(dirPath, ext) {
-
   function scanDir(dirPath, ext) {
     const result = readdirSync(dirPath);
     if (!result.length) return [];
-    return result.filter(name => !(blackList || []).includes(name)).map((dirName) => {
+    return result.filter((name) => !(blackList || []).includes(name)).map((dirName) => {
       const filePath = join(dirPath, dirName);
       if (statSync(filePath).isDirectory()) {
         return scanDir(join(dirPath, dirName), ext);
@@ -77,7 +76,7 @@ function getAllFiles(dirPath, ext) {
     }, []);
   }
 
-  return flatten(scanDir(dirPath, ext)).filter(file => file);
+  return flatten(scanDir(dirPath, ext)).filter((file) => file);
 }
 
 /**
@@ -86,7 +85,7 @@ function getAllFiles(dirPath, ext) {
  * @example filterFilesByExt([], '.md')
  * @param fileList
  * @param ext
- * @returns {*}
+ * @return {*}
  */
 function filterFilesByExt(fileList, ext) {
   return fileList.filter((name) => extname(name) === ext);
@@ -95,7 +94,7 @@ function filterFilesByExt(fileList, ext) {
 /**
  * 获取文件hash
  * @param pathToFile
- * @returns {Array}
+ * @return {Array}
  */
 function revision(pathToFile) {
   try {
@@ -108,17 +107,18 @@ function revision(pathToFile) {
 /**
  * 转换文章内的代码片段
  * @param source
- * @returns {Promise}
+ * @return {Promise}
  */
 function codeParser(source) {
   // 递归处理当前数据中的高亮代码
   // 优先处理定义语言类型的段落块，避免匹配方式查找出错
   return new Promise((resolve, reject) => {
-
     const CodeTypeDefined = source.match(/```(\S+)\n([\s\S\n]+?)\n```+?/);
     const CodeTypeUndefined = source.match(/```\n([\s\S\n]+?)\n```+?/);
 
-    let originText, lang, code;
+    let originText;
+    let lang;
+    let code;
 
     if (CodeTypeDefined) {
       [originText, lang, code] = CodeTypeDefined;
@@ -155,7 +155,6 @@ function codeParser(source) {
       return resolve(codeParser(source.replace(originText, '{{<crayonCode>}}\n' + body + '\n{{</crayonCode>}}')));
     });
   });
-
 }
 
 if (!existsSync(cache.database)) writeFileSync(cache.database, '{}');
@@ -163,7 +162,6 @@ if (!existsSync(cache.rootDir)) mkdirSync(cache.rootDir);
 
 // todo cli invoke compatibility
 module.exports = (sourceDirPath, distDirPath, useCodeHighlight) => {
-
   let cacheData;
   try {
     cacheData = require(cache.database);
@@ -181,7 +179,7 @@ module.exports = (sourceDirPath, distDirPath, useCodeHighlight) => {
     /**
      * 修正最后一行内容
      * @param descResult
-     * @returns {*}
+     * @return {*}
      */
     function fixLastLine(descResult) {
       const lastLineNumber = descResult.length - 1;
@@ -211,7 +209,7 @@ module.exports = (sourceDirPath, distDirPath, useCodeHighlight) => {
     /**
      * 获取描述内容
      * @param descResult
-     * @returns {string}
+     * @return {string}
      */
     function getResult(descResult) {
       // console.log(descResult);
@@ -307,10 +305,9 @@ module.exports = (sourceDirPath, distDirPath, useCodeHighlight) => {
    * @param data
    * @param fileContent
    * @param src
-   * @returns {*}
+   * @return {*}
    */
   function generatePostMetaTemplate(data, fileContent, src) {
-
     let header;
 
     try {
@@ -387,7 +384,7 @@ module.exports = (sourceDirPath, distDirPath, useCodeHighlight) => {
 
     tpl.push(`isCJKLanguage: true`);
 
-    var gitInfo = revision(src).split('\n');
+    let gitInfo = revision(src).split('\n');
     if (gitInfo[0]) {
       tpl.push(`gitComment: "${gitInfo[0]}"`);
       tpl.push(`gitFile: "${src}"`);
@@ -410,16 +407,14 @@ module.exports = (sourceDirPath, distDirPath, useCodeHighlight) => {
     // "dataFormated": "2007/08/26",
 
     return Promise.resolve(tpl.join('\n') + '\n\n');
-
   }
 
   /**
    * 生成文章内容
    * @param params
-   * @returns {Promise<any>}
+   * @return {Promise<any>}
    */
   async function mixParsedContent(params) {
-
     const {metaContent, postContent, postFile, distFile, idx} = params;
 
     dirFilter(distFile.split('/').slice(0, -1)).forEach((dirPath) => {
@@ -501,7 +496,6 @@ module.exports = (sourceDirPath, distDirPath, useCodeHighlight) => {
   allPostFileChunks.reduce((promiseFactory, jobGroup, jobGroupIdx) => {
     return promiseFactory.then(() => {
       return Promise.all[jobGroup.map(async (postFile, jobIdx) => {
-
         const postContent = readFileSync(postFile, charset);
         const metaFile = `${dirname(postFile)}/${basename(postFile, '.md')}.json`;
         const metaContent = readFileSync(metaFile, charset);
@@ -529,7 +523,6 @@ module.exports = (sourceDirPath, distDirPath, useCodeHighlight) => {
 
         const idx = jobGroupIdx * concurrence + jobIdx + 1;
         return await mixParsedContent({metaContent, postContent, postFile, distFile, idx});
-
       })];
     });
   }, Promise.resolve());

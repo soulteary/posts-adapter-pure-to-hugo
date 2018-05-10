@@ -8,6 +8,6 @@ module.exports = {
     'node': true,
   },
   'rules': {
-    'max-len': 0,
+    'max-len': ['error', 200, 2, {ignoreComments: true}],
   },
 };

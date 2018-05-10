@@ -11,13 +11,19 @@ const config = require('./config.json');
 
 // todo enable useCodeHighlight feature
 module.exports = (sourceDirPath, distDirPath) => {
-
   const sourceDir = relative('.', sourceDirPath);
   const distDir = distDirPath ? `${distDirPath}/archives` : join('./export', basename(sourceDir), 'archives');
   if (!existsSync(distDir)) mkdirSync(distDir);
 
+  /**
+   * todo refactor
+   *
+   * @param {object} err 错误信息
+   * @param {array} list 文件列表
+   * @param {object} data 数据
+   * @return {void}
+   */
   function completionCallback(err, list, data) {
-
     if (err) return console.error(err);
 
     let yearList = Object.keys(data).filter((yearDir) => yearDir.match(/^\d{4}/));
@@ -34,7 +40,7 @@ module.exports = (sourceDirPath, distDirPath) => {
       monthList.forEach((month) => {
         finalData[year][month] = finalData[year][month] || {};
         let monthDir = join(yearDir, month);
-        // if (!existsSync(monthDir)) mkdirSync(monthDir);
+        if (!existsSync(monthDir)) mkdirSync(monthDir);
 
         const monthData = data[year][month];
         const dayList = Object.keys(monthData);
@@ -51,8 +57,8 @@ module.exports = (sourceDirPath, distDirPath) => {
 
     /**
      * 补全并按照desc排列数字
-     * @param data
-     * @returns {Array}
+     * @param {object} data
+     * @return {Array}
      */
     function descData(data) {
       return Object.keys(data).
@@ -64,6 +70,12 @@ module.exports = (sourceDirPath, distDirPath) => {
           });
     }
 
+    /**
+     *
+     * @param {string} title
+     * @param {string} now
+     * @return {string}
+     */
     function metaData(title, now) {
       return `---
 title: "${title}"
@@ -80,6 +92,12 @@ outputs: [ "HTML"]
 ---`;
     }
 
+    /**
+     * 生成归档
+     *
+     * @param {string} year
+     * @param {object} data
+     */
     function generateYearArchive(year, data) {
       const now = 'Tue, 06 Jun 2017 18:33:59 +0800';
       let tpl = [metaData(`${year}年文章存档`, now)];
@@ -94,27 +112,23 @@ outputs: [ "HTML"]
 
         const dayList = descData(data[year][month]);
         dayList.forEach((day) => {
-
           const dayData = data[year][month][day];
           const dayDir = join(sourceDir, year, month, day);
           Object.keys(dayData).filter((file) => file.endsWith('.json')).forEach((file) => {
-
             const content = JSON.parse(readFileSync(join(dayDir, file)).toString());
             let {title, slug} = content;
             tpl.push(`- \`${day}\` [${title}](/${year}/${month}/${day}/${slug}.html)`);
             monthTpl.push(`- \`${day}\` [${title}](/${year}/${month}/${day}/${slug}.html)`);
-
           });
         });
 
         if (!existsSync(join(distDir, year, month))) mkdirSync(join(distDir, year, month));
         writeFileSync(join(distDir, year, month, 'index.md'), monthTpl.join('\n'));
-
       });
       writeFileSync(join(distDir, year, 'index.md'), tpl.join('\n'));
     }
 
-    const ignoreYearList = config.blackList.filter(name => name.match(/20\d{2}/)).map(year => Number(year));
+    const ignoreYearList = config.blackList.filter((name) => name.match(/20\d{2}/)).map((year) => Number(year));
     let yearSkipped = [];
     Object.keys(finalData).forEach((year) => {
       if (ignoreYearList.includes(Number(year))) return yearSkipped.push(year);
@@ -122,7 +136,6 @@ outputs: [ "HTML"]
     });
 
     console.log(`根据配置忽略以下年份的归档信息：${yearSkipped.join(',')}.`);
-
   }
 
   scandir(sourceDir, {

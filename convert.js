@@ -5,16 +5,24 @@
 // 非高频使用，使用*sync api取代async api
 const {existsSync, readdirSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, statSync} = require('fs');
 const {basename, extname, dirname, join, relative} = require('path');
-const {createHmac} = require('crypto');
 const {execSync} = require('child_process');
 const {stringify} = require('querystring');
 const {chunk} = require('lodash');
+
+const hljs = require('highlight.js');
+// 4个空格？如果存在eslint，可以去掉
+hljs.configure({tabReplace: '    ', classPrefix: ''});
+
+const eslint = require('eslint');
+const linter = new eslint.Linter();
+
+const {getAllFiles, md5} = require('./helper');
 
 const config = require('./config.json');
 const pkg = require('./package');
 
 // 忽略文件列表、文件编码、调试模式
-const {blackList, charset, debug, timezone, cache} = config;
+const {blackList, charset, debug, timezone, cache, concurrence} = config;
 
 const moment = require('moment');
 const momentTimezone = require('moment-timezone');
@@ -30,53 +38,11 @@ const {post} = require('request');
 const {showCategory} = debug;
 
 /**
- * 计算文件Hash
- * @param data
- * @return {string}
- */
-function sign(data) {
-  return createHmac('md5', data).digest('hex');
-}
-
-/**
  * 目录过滤器
  * @param targetDirs
  */
 function dirFilter(targetDirs) {
   return targetDirs.map((item, idx) => targetDirs.slice(0, idx + 1).join('/')).filter((item) => item && item !== '.');
-}
-
-/**
- * 扫描指定目录的文件
- * @param dirPath     目录位置
- * @param ext         文件类型（可选）
- * @return {Array}   带目录结构的数组
- */
-function getAllFiles(dirPath, ext) {
-  function scanDir(dirPath, ext) {
-    const result = readdirSync(dirPath);
-    if (!result.length) return [];
-    return result.filter((name) => !(blackList || []).includes(name)).map((dirName) => {
-      const filePath = join(dirPath, dirName);
-      if (statSync(filePath).isDirectory()) {
-        return scanDir(join(dirPath, dirName), ext);
-      } else {
-        if (!ext) return filePath;
-        if (filePath.lastIndexOf(ext) === filePath.indexOf(ext) && filePath.indexOf(ext) > -1) {
-          return filePath;
-        }
-        return '';
-      }
-    });
-  }
-
-  function flatten(arr) {
-    return arr.reduce(function(flat, toFlatten) {
-      return flat.concat(Array.isArray(toFlatten) ? flatten(toFlatten) : toFlatten);
-    }, []);
-  }
-
-  return flatten(scanDir(dirPath, ext)).filter((file) => file);
 }
 
 /**
@@ -129,6 +95,17 @@ function codeParser(source) {
       // 查找不到匹配内容，返回传入数据
       return resolve(source);
     }
+
+    // if (lang === 'js' && hljs.getLanguage(lang)) {
+    //   var messages = linter.verifyAndFix(code);
+    //   console.log(messages);
+    //   console.log(getLanguage(lang), lang);
+    //   console.log(hljs.highlight(lang, code));
+    //   process.exit(0);
+    // } else {
+    //   console.log(hljs.highlightAuto(code));
+    // }
+    // return resolve(true);
 
     if (!code) return resolve(source);
 
@@ -473,25 +450,23 @@ module.exports = (sourceDirPath, distDirPath, useCodeHighlight) => {
   }
 
   // 检查是否有存在缺少元文件的文档
-  const postsWithoutMetaFile = allPostFiles.
-      map((name) => `${dirname(name)}/${basename(name, '.md')}.json`).filter((name) => !existsSync(name));
+  const postsWithoutMetaFile = allPostFiles.map((name) => `${dirname(name)}/${basename(name, '.md')}.json`).filter((name) => !existsSync(name));
   if (postsWithoutMetaFile.length) {
     log4matchMeta.error('存在缺失Meta文件的文章', postsWithoutMetaFile);
     process.exit(1);
   }
 
   // 检查是否有多余的元文件
-  const metaFilesWithoutPostFile = filterFilesByExt(allFiles, '.json').
-      map((name) => `${dirname(name)}/${basename(name, '.json')}.md`).filter((name) => !existsSync(name));
+  const metaFilesWithoutPostFile = filterFilesByExt(allFiles, '.json').map((name) => `${dirname(name)}/${basename(name, '.json')}.md`).filter((name) => !existsSync(name));
   if (postsWithoutMetaFile.length) {
     log4matchMeta.error('存在多余的MetaFiles', metaFilesWithoutPostFile);
     process.exit(2);
   }
 
   // 开始处理文件
-  // 并发
-  const concurrence = 3;
-  const allPostFileChunks = chunk(allPostFiles, concurrence);
+  const maxConcurrence = concurrence || 3;
+  const allPostFileChunks = chunk(allPostFiles.slice(debug && debug.enable ? debug.maxFilesCount * -1 : 0), maxConcurrence);
+  console.log(allPostFileChunks);
 
   allPostFileChunks.reduce((promiseFactory, jobGroup, jobGroupIdx) => {
     return promiseFactory.then(() => {
@@ -500,29 +475,42 @@ module.exports = (sourceDirPath, distDirPath, useCodeHighlight) => {
         const metaFile = `${dirname(postFile)}/${basename(postFile, '.md')}.json`;
         const metaContent = readFileSync(metaFile, charset);
         const distFile = join(cache.rootDir, postFile.replace(/\.\.\//g, '')).replace(/^\//g, '');
-        const checksum = sign(`${postContent}\n${pkg.version}\n${metaContent}`);
+        const contentFingerprint = md5(`${postContent}\n${pkg.version}\n${metaContent}`);
 
-        // TODO: recheck cache file
-        // if (!existsSync(distFile)) {
-        //   log4process.warn('缺少缓存文件', distFile);
-        //   process.exit(1);
-        // }
-        // const distChecksum = sign(readFileSync(distFile, charset));
+        // 是否重新生成缓存
+        let reGenerate = false;
 
-        // 如果缓存数据包含输出文件地址，缓存文件存在，并且缓存数据指纹未变化
-        if (cacheData.hasOwnProperty(distFile) &&
-            cacheData[distFile] === checksum &&
-            // todo check dist file checksum
-            existsSync(distFile)
-        ) {
+        // 缓存数据库是否有记录
+        if (cacheData[distFile]) {
+          // 文件存在变动
+          if (cacheData[distFile].content !== contentFingerprint) reGenerate = true;
+          // 缺少缓存数据库中对应的缓存文件
+          if (!existsSync(distFile)) {
+            reGenerate = true;
+          } else {
+            // 缓存文件指纹不正确
+            const cacheFingerprint = md5(readFileSync(distFile, charset));
+            if (cacheData[distFile].cache !== cacheFingerprint) reGenerate = true;
+          }
+        } else {
+          // 缓存数据库无记录
+          reGenerate = true;
+        }
+
+        if (reGenerate === false) {
           fileCount++;
           return log4process.log(`[${(fileCount / allPostFiles.length * 100).toFixed(2)}%] [跳过处理] ${postFile}`);
         }
 
-        cacheData[distFile] = checksum;
-
         const idx = jobGroupIdx * concurrence + jobIdx + 1;
-        return await mixParsedContent({metaContent, postContent, postFile, distFile, idx});
+        await mixParsedContent({metaContent, postContent, postFile, distFile, idx});
+
+        // 文件处理完毕，统一进行记录
+        cacheData[distFile] = cacheData[distFile] || {};
+        cacheData[distFile].content = contentFingerprint;
+        cacheData[distFile].cache = md5(readFileSync(distFile, charset));
+
+        return true;
       })];
     });
   }, Promise.resolve());

@@ -3,6 +3,7 @@
 // 非高频使用，使用*sync api取代async api
 const {readdirSync, statSync} = require('fs');
 const {join} = require('path');
+const {createHmac} = require('crypto');
 
 const config = require('./config.json');
 
@@ -53,4 +54,13 @@ function getAllFiles(dirPath, ext) {
   return flatten(scanDir(dirPath, ext)).filter((file) => file);
 }
 
-module.exports = {getAllFiles};
+/**
+ * 计算文件Hash
+ * @param data
+ * @return {string}
+ */
+function md5(data) {
+  return createHmac('md5', data).digest('hex');
+}
+
+module.exports = {getAllFiles, md5};

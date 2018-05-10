@@ -27,6 +27,8 @@
     "rootDir": "./cache",
     "database": "./cache.json"
   },
+  "//": "并发处理",
+  "concurrence": 3,
   "//": "要转换的数据源",
   "jobs": [
     {

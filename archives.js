@@ -155,7 +155,6 @@ module.exports = (sourceDirPath, distDirPath) => {
       map((file) => file.replace(/(.*\/)\d{4}\/\d{2}\/\d{2}/, ($1, $2) => $1.replace($2, ''))).
       reduce((result, item) => {
         let [year, month, day, file] = item.split('/');
-        console.log([year, month, day, file]);
         result[year] = result[year] || {};
         result[year][month] = result[year][month] || {};
         result[year][month][day] = result[year][month][day] || {};

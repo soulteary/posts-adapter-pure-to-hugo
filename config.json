@@ -19,8 +19,9 @@
     "showCategory": false
   },
   "//": "外部代码高亮接口地址",
-  "codeHighLight": {
-    "api": "http://127.0.0.1:1234/?api"
+  "codeHighlight": {
+    "api": "http://127.0.0.1:1234/?api",
+    "remote": true
   },
   "//": "缓存目录",
   "cache": {

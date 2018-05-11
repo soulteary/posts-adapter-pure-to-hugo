@@ -11,7 +11,7 @@ const {chunk} = require('lodash');
 
 const hljs = require('highlight.js');
 // 4个空格？如果存在eslint，可以去掉
-hljs.configure({tabReplace: '    ', classPrefix: ''});
+hljs.configure({tabReplace: '    ', classPrefix: 'hljs-'});
 
 const eslint = require('eslint');
 const linter = new eslint.Linter();
@@ -22,7 +22,7 @@ const config = require('./config.json');
 const pkg = require('./package');
 
 // 忽略文件列表、文件编码、调试模式
-const {blackList, charset, debug, timezone, cache, concurrence} = config;
+const {blackList, charset, debug, timezone, cache, concurrence, codeHighlight} = config;
 
 const moment = require('moment');
 const momentTimezone = require('moment-timezone');
@@ -75,7 +75,7 @@ function revision(pathToFile) {
  * @param source
  * @return {Promise}
  */
-function codeParser(source) {
+function remoteCodeParser(source) {
   // 递归处理当前数据中的高亮代码
   // 优先处理定义语言类型的段落块，避免匹配方式查找出错
   return new Promise((resolve, reject) => {
@@ -112,7 +112,7 @@ function codeParser(source) {
     // todo 清理未明确定义的代码片段
     const postData = {'code': `[crayon lang=${lang ? lang : 'text'}]\n${code}\n[/crayon]\n`};
 
-    post({url: config.codeHighLight.api, form: stringify(postData)}, (err, httpResponse, body) => {
+    post({url: config.codeHighlight.api, form: stringify(postData)}, (err, httpResponse, body) => {
       if (err) {
         console.log('code:', httpResponse && httpResponse.statusCode);
         console.log(err);
@@ -127,10 +127,50 @@ function codeParser(source) {
 
       if (Number(httpResponse.statusCode) !== 200) {
         console.log('接口状态不正确，重新渲染', httpResponse.statusCode);
-        return resolve(codeParser(source));
+        return resolve(remoteCodeParser(source));
       }
-      return resolve(codeParser(source.replace(originText, '{{<crayonCode>}}\n' + body + '\n{{</crayonCode>}}')));
+      return resolve(remoteCodeParser(source.replace(originText, '{{<crayonCode>}}\n' + body + '\n{{</crayonCode>}}')));
     });
+  });
+}
+
+function codeParser(source) {
+  // 递归处理当前数据中的高亮代码
+  // 优先处理定义语言类型的段落块，避免匹配方式查找出错
+  return new Promise((resolve, reject) => {
+    const CodeTypeDefined = source.match(/```(\S+)\n([\s\S\n]+?)\n```+?/);
+    const CodeTypeUndefined = source.match(/```\n([\s\S\n]+?)\n```+?/);
+
+    let originText;
+    let lang;
+    let code;
+
+    if (CodeTypeDefined) {
+      [originText, lang, code] = CodeTypeDefined;
+    } else if (CodeTypeUndefined) {
+      // lang 注定不存在
+      [originText, code, lang] = CodeTypeUndefined;
+    } else {
+      // 查找不到匹配内容，返回传入数据
+      return resolve(source);
+    }
+
+    let highlightResult;
+    if (hljs.getLanguage(lang)) {
+      //   var messages = linter.verifyAndFix(code);
+      //   console.log(messages);
+      //   console.log(getLanguage(lang), lang);
+      highlightResult = hljs.highlight(lang, code);
+    } else {
+      highlightResult = hljs.highlightAuto(code);
+    }
+
+    highlightResult = highlightResult.value.split('\n').map((line, idx) => `<div class="hljs-line ${idx % 2 === 0 ? 'hljs-striped-line':''}">${line}</div>`).join('\n');
+    highlightResult = `<div class="hljs">${highlightResult}</div>`
+
+    if (!code) return resolve(source);
+
+    return resolve(codeParser(source.replace(originText, '{{<highlightCode>}}' + highlightResult + '\n{{</highlightCode>}}')));
   });
 }
 
@@ -392,14 +432,14 @@ module.exports = (sourceDirPath, distDirPath, useCodeHighlight) => {
    * @return {Promise<any>}
    */
   async function mixParsedContent(params) {
-    const {metaContent, postContent, postFile, distFile, idx} = params;
+    const {metaContent, postContent, postFile, distFile, idx, postsCount} = params;
 
     dirFilter(distFile.split('/').slice(0, -1)).forEach((dirPath) => {
       if (!existsSync(dirPath)) return mkdirSync(dirPath);
     });
 
     const metaPart = await generatePostMetaTemplate(metaContent, postContent, postFile);
-    const postPart = useCodeHighlight ? await codeParser(postContent) : postContent;
+    const postPart = useCodeHighlight ? codeHighlight.remote ? await remoteCodeParser(postContent) : await codeParser(postContent) : postContent;
 
     if (!metaPart || !postPart) {
       const error = `文件数据有问题: ${postFile}`;
@@ -411,7 +451,7 @@ module.exports = (sourceDirPath, distDirPath, useCodeHighlight) => {
       try {
         writeFileSync(distFile, content, {encoding: charset});
         fileCount++;
-        const message = `[${(fileCount / allPostFiles.length * 100).toFixed(2)}%] [${idx}] [done] ${distFile}`;
+        const message = `[${(fileCount / postsCount * 100).toFixed(2)}%] [${idx}] [done] ${distFile}`;
         log4process.log(message);
         return message;
       } catch (e) {
@@ -466,7 +506,6 @@ module.exports = (sourceDirPath, distDirPath, useCodeHighlight) => {
   // 开始处理文件
   const maxConcurrence = concurrence || 3;
   const allPostFileChunks = chunk(allPostFiles.slice(debug && debug.enable ? debug.maxFilesCount * -1 : 0), maxConcurrence);
-  console.log(allPostFileChunks);
 
   allPostFileChunks.reduce((promiseFactory, jobGroup, jobGroupIdx) => {
     return promiseFactory.then(() => {
@@ -502,8 +541,8 @@ module.exports = (sourceDirPath, distDirPath, useCodeHighlight) => {
           return log4process.log(`[${(fileCount / allPostFiles.length * 100).toFixed(2)}%] [跳过处理] ${postFile}`);
         }
 
-        const idx = jobGroupIdx * concurrence + jobIdx + 1;
-        await mixParsedContent({metaContent, postContent, postFile, distFile, idx});
+        const idx = jobGroupIdx * maxConcurrence + (jobIdx + 1);
+        await mixParsedContent({metaContent, postContent, postFile, distFile, idx, postsCount: allPostFiles.length});
 
         // 文件处理完毕，统一进行记录
         cacheData[distFile] = cacheData[distFile] || {};

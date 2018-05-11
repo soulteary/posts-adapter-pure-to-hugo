@@ -1,11 +1,26 @@
-FROM node:9.10.0-alpine
+FROM ubuntu:16.04
+RUN ln -sf /bin/bash /bin/sh
 
 MAINTAINER soulteary <soulteary@gmail.com>
 
-ADD . /app
+RUN apt-get update && apt-get install -y curl git
+
+ARG NODE_VERSION=10.1.0
+RUN curl -o- https://raw.githubusercontent.com/creationix/nvm/v0.33.8/install.sh | bash \
+    && source $HOME/.nvm/nvm.sh \
+    && nvm install $NODE_VERSION \
+    && nvm alias $NODE_VERSION \
+    && npm cache clean --force
 
 WORKDIR /app
 
-RUN npm install
+ADD ./package.json /app
+ADD ./package-lock.json /app
 
-CMD [ "/app/bin/convert", "--use-config", "true" ]
+RUN source $HOME/.nvm/nvm.sh && \
+    npm install
+
+ADD . /app
+
+CMD source $HOME/.nvm/nvm.sh && \
+    npm start

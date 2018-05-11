@@ -15,12 +15,12 @@
   "//": "调试信息",
   "debug": {
     "enable": false,
-    "maxFilesCount": 1,
+    "maxFilesCount": 11,
     "showCategory": false
   },
   "//": "外部代码高亮接口地址",
   "codeHighlight": {
-    "api": "http://127.0.0.1:1234/?api",
+    "api": "http://crayon/?api",
     "remote": true
   },
   "//": "缓存目录",
@@ -29,7 +29,7 @@
     "database": "./cache.json"
   },
   "//": "并发处理",
-  "concurrence": 3,
+  "concurrence": 10,
   "//": "要转换的数据源",
   "jobs": [
     {

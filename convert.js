@@ -548,11 +548,10 @@ module.exports = (sourceDirPath, distDirPath, useCodeHighlight) => {
         cacheData[distFile] = cacheData[distFile] || {};
         cacheData[distFile].content = contentFingerprint;
         cacheData[distFile].cache = md5(readFileSync(distFile, charset));
-
+        writeFileSync(cache.database, JSON.stringify(cacheData));
         return true;
       })];
     });
   }, Promise.resolve());
 
-  writeFileSync(cache.database, JSON.stringify(cacheData));
 };

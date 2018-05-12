@@ -96,17 +96,6 @@ function remoteCodeParser(source) {
       return resolve(source);
     }
 
-    // if (lang === 'js' && hljs.getLanguage(lang)) {
-    //   var messages = linter.verifyAndFix(code);
-    //   console.log(messages);
-    //   console.log(getLanguage(lang), lang);
-    //   console.log(hljs.highlight(lang, code));
-    //   process.exit(0);
-    // } else {
-    //   console.log(hljs.highlightAuto(code));
-    // }
-    // return resolve(true);
-
     if (!code) return resolve(source);
 
     // todo 清理未明确定义的代码片段
@@ -122,7 +111,8 @@ function remoteCodeParser(source) {
         console.log(postData);
         console.log();
         console.log();
-        return reject(err);
+        console.log('接口返回不正确，重新渲染', source);
+        return resolve(remoteCodeParser(source));
       }
 
       if (Number(httpResponse.statusCode) !== 200) {
@@ -165,8 +155,8 @@ function codeParser(source) {
       highlightResult = hljs.highlightAuto(code);
     }
 
-    highlightResult = highlightResult.value.split('\n').map((line, idx) => `<div class="hljs-line ${idx % 2 === 0 ? 'hljs-striped-line':''}">${line}</div>`).join('\n');
-    highlightResult = `<div class="hljs">${highlightResult}</div>`
+    highlightResult = highlightResult.value.split('\n').map((line, idx) => `<div class="hljs-line ${idx % 2 === 0 ? 'hljs-striped-line' : ''}">${line}</div>`).join('\n');
+    highlightResult = `<div class="hljs">${highlightResult}</div>`;
 
     if (!code) return resolve(source);
 

@@ -27,6 +27,6 @@
     "lodash": "4.17.10",
     "moment": "2.18.1",
     "moment-timezone": "0.5.13",
-    "request": "2.81.0"
+    "request": "2.82.0"
   }
 }

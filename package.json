@@ -21,7 +21,7 @@
   "homepage": "https://github.com/soulteary/posts-adapter-pure-to-hugo#readme",
   "dependencies": {
     "commander": "2.9.0",
-    "eslint": "4.19.1",
+    "eslint": "6.0.0",
     "eslint-config-google": "0.9.1",
     "highlight.js": "9.12.0",
     "lodash": "4.17.10",
